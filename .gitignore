@@ -6,4 +6,5 @@ __pycache__/
 dist/
 *.egg-info/
 .env
+*.pdf
 CLAUDE.md

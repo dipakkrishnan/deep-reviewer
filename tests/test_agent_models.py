@@ -7,9 +7,12 @@ from agent import (
     ReviewMode,
     ReviewPreset,
     ReviewRequest,
+    ReviewRunResult,
     SubagentGoal,
     get_review_preset,
+    run_review,
 )
+from models import Artifact, ArtifactSource
 
 
 class ReviewRequestTests(unittest.TestCase):
@@ -17,16 +20,7 @@ class ReviewRequestTests(unittest.TestCase):
         request = ReviewRequest()
 
         self.assertEqual(request.mode, ReviewMode.STANDARD)
-        self.assertEqual(request.model, "claude-sonnet-4-6")
-        self.assertEqual(request.allowed_tools, [])
-
-    def test_allowed_tools_are_not_shared(self) -> None:
-        first = ReviewRequest()
-        second = ReviewRequest()
-
-        first.allowed_tools.append("search")
-
-        self.assertEqual(second.allowed_tools, [])
+        self.assertEqual(request.model, "claude-opus-4-6")
 
     def test_rejects_invalid_max_subagents(self) -> None:
         with self.assertRaises(ValidationError):
@@ -76,14 +70,6 @@ class AgentSettingsTests(unittest.TestCase):
 
         self.assertEqual(settings.subagent_count, 5)
 
-    def test_copies_allowed_tools(self) -> None:
-        request = ReviewRequest(allowed_tools=["search"])
-
-        settings = AgentSettings.from_request(request)
-        request.allowed_tools.append("code")
-
-        self.assertEqual(settings.allowed_tools, ["search"])
-
 
 class SubagentGoalTests(unittest.TestCase):
     def test_accepts_valid_goal(self) -> None:
@@ -107,8 +93,33 @@ class AgentExportsTests(unittest.TestCase):
         self.assertIsNotNone(ReviewMode)
         self.assertIsNotNone(ReviewPreset)
         self.assertIsNotNone(ReviewRequest)
+        self.assertIsNotNone(ReviewRunResult)
         self.assertIsNotNone(SubagentGoal)
         self.assertTrue(callable(get_review_preset))
+        self.assertTrue(callable(run_review))
+
+
+class ReviewRunnerTypesTests(unittest.IsolatedAsyncioTestCase):
+    def test_review_run_result_shape(self) -> None:
+        result = ReviewRunResult(
+            artifact_title="Test Paper",
+            settings=AgentSettings.from_request(ReviewRequest()),
+            report_markdown="# Review\n\nHigh-level summary.",
+        )
+
+        self.assertEqual(result.artifact_title, "Test Paper")
+        self.assertEqual(result.report_markdown, "# Review\n\nHigh-level summary.")
+
+    async def test_run_review_is_not_implemented(self) -> None:
+        artifact = Artifact(
+            source=ArtifactSource.PDF,
+            url="/tmp/paper.pdf",
+            title="Test Paper",
+            text="Paper body.",
+        )
+
+        with self.assertRaises(NotImplementedError):
+            await run_review(ReviewRequest(), artifact)
 
 
 if __name__ == "__main__":

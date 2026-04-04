@@ -56,7 +56,6 @@ class AgentSettings(BaseModel):
     model: str
     subagent_count: int = Field(gt=0)
     self_play_rounds: int = Field(gt=0)
-    allowed_tools: list[str] = Field(default_factory=list)
 
     @classmethod
     def from_request(cls, request: ReviewRequest) -> "AgentSettings":
@@ -66,5 +65,4 @@ class AgentSettings(BaseModel):
             model=request.model,
             subagent_count=request.max_subagents or preset.subagent_count,
             self_play_rounds=preset.self_play_rounds,
-            allowed_tools=list(request.allowed_tools),
         )

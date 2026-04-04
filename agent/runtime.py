@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,8 +16,13 @@ from claude_agent_sdk.types import (
 )
 
 from agent.claude_tools import ORCHESTRATOR_TOOLS
+from telemetry import append_event, update_run
 
 AskUserHandler = Callable[[dict], dict[str, str]]
+
+
+def _sdk_stderr(line: str) -> None:
+    log.error("Claude CLI stderr: %s", line.rstrip())
 
 
 def _build_can_use_tool(ask_user: AskUserHandler | None):
@@ -76,6 +82,8 @@ async def run_agent(
             cwd=cwd,
             resume=session_id,
             can_use_tool=_build_can_use_tool(ask_user),
+            stderr=_sdk_stderr,
+            debug_stderr=sys.stderr,
             hooks={
                 "PreToolUse": [HookMatcher(matcher=None, hooks=[_dummy_hook])]
             },
@@ -105,6 +113,7 @@ async def run_agent(
 class StreamSession:
     """Shared state for pause/resume coordination during streamed runs."""
 
+    review_id: str
     events: asyncio.Queue
     answer_event: asyncio.Event
     answer_slot: dict | None = None
@@ -119,6 +128,17 @@ def _build_can_use_tool_streamed(session: StreamSession):
         if tool_name == "AskUserQuestion":
             questions = input_data.get("questions", [])
             log.info("Agent asking %d question(s), pausing for user", len(questions))
+            append_event(
+                session.review_id,
+                "questions_requested",
+                question_count=len(questions),
+                questions=questions,
+            )
+            update_run(
+                session.review_id,
+                status="waiting_for_answers",
+                question_count=len(questions),
+            )
             await session.events.put(
                 {"type": "status", "status": "waiting for interview answers"}
             )
@@ -128,6 +148,17 @@ def _build_can_use_tool_streamed(session: StreamSession):
             answers = session.answer_slot or {}
             session.answer_slot = None
             log.info("User answered, resuming agent")
+            append_event(
+                session.review_id,
+                "answers_applied",
+                answers=answers,
+            )
+            update_run(
+                session.review_id,
+                status="resuming_after_answers",
+                answers=answers,
+                answers_submitted=True,
+            )
             await session.events.put(
                 {"type": "status", "status": "interview complete, resuming review"}
             )
@@ -149,6 +180,20 @@ async def run_agent_streamed(
 ) -> None:
     """Run a prompt through the Claude Agent SDK, pushing events to session.events."""
     log.info("Starting streamed review — model=%s provider=%s", model, provider)
+    append_event(
+        session.review_id,
+        "agent_started",
+        model=model,
+        provider=provider,
+        cwd=cwd,
+    )
+    update_run(
+        session.review_id,
+        status="running",
+        model=model,
+        provider=provider,
+        workspace=cwd,
+    )
     if provider != "anthropic":
         await session.events.put(
             {"type": "error", "message": f"Unsupported provider: {provider}"}
@@ -157,6 +202,7 @@ async def run_agent_streamed(
         return
 
     try:
+        result_emitted = False
         if cwd:
             Path(cwd).mkdir(parents=True, exist_ok=True)
         options = ClaudeAgentOptions(
@@ -166,6 +212,8 @@ async def run_agent_streamed(
             model=model,
             cwd=cwd,
             can_use_tool=_build_can_use_tool_streamed(session),
+            stderr=_sdk_stderr,
+            debug_stderr=sys.stderr,
             hooks={
                 "PreToolUse": [HookMatcher(matcher=None, hooks=[_dummy_hook])]
             },
@@ -182,17 +230,58 @@ async def run_agent_streamed(
             if isinstance(message, SystemMessage) and message.subtype == "init":
                 sid = message.data.get("session_id")
                 log.info("Session established: %s", sid)
+                append_event(session.review_id, "session_established", session_id=sid)
+                update_run(session.review_id, session_id=sid)
                 await session.events.put(
                     {"type": "status", "status": "running", "session_id": sid}
                 )
             if isinstance(message, ResultMessage):
                 log.info("Agent finished — result length=%d chars", len(message.result))
+                result_emitted = True
+                append_event(
+                    session.review_id,
+                    "agent_finished",
+                    session_id=message.session_id,
+                    total_cost_usd=message.total_cost_usd,
+                    duration_ms=message.duration_ms,
+                    num_turns=message.num_turns,
+                    usage=message.usage,
+                    model_usage=message.model_usage,
+                    is_error=message.is_error,
+                )
+                update_run(
+                    session.review_id,
+                    status="completed" if not message.is_error else "failed",
+                    session_id=message.session_id,
+                    total_cost_usd=message.total_cost_usd,
+                    duration_ms=message.duration_ms,
+                    duration_api_ms=message.duration_api_ms,
+                    num_turns=message.num_turns,
+                    usage=message.usage,
+                    model_usage=message.model_usage,
+                    stop_reason=message.stop_reason,
+                    result_preview=(message.result or "")[:500],
+                    error_messages=message.errors,
+                )
                 await session.events.put(
                     {"type": "status", "status": "final review ready"}
                 )
                 await session.events.put({"type": "result", "text": message.result})
+                break
     except Exception as exc:
+        if result_emitted:
+            log.warning(
+                "Claude transport failed after final result was emitted; treating run as completed"
+            )
+            append_event(
+                session.review_id,
+                "post_result_transport_error",
+                error=str(exc),
+            )
+            return
         log.exception("Agent loop failed")
+        append_event(session.review_id, "agent_failed", error=str(exc))
+        update_run(session.review_id, status="failed", error=str(exc))
         await session.events.put({"type": "error", "message": str(exc)})
     finally:
         await session.events.put({"type": "done"})

@@ -1,3 +1,5 @@
+import katex from "katex";
+import "katex/dist/katex.min.css";
 import "./styles.css";
 
 type ReviewMode = "quick" | "standard" | "deep";
@@ -67,7 +69,7 @@ function renderBlock(block: string): string {
   }
 
   if (block.startsWith("$$") && block.endsWith("$$")) {
-    return `<pre class="math-block">${escapeHtml(block.slice(2, -2).trim())}</pre>`;
+    return renderMath(block.slice(2, -2).trim(), true);
   }
 
   const lines = block.split("\n");
@@ -103,8 +105,26 @@ function renderBlock(block: string): string {
   return `<p>${html}</p>`;
 }
 
+function renderMath(tex: string, displayMode: boolean): string {
+  try {
+    return katex.renderToString(tex, { displayMode, throwOnError: false });
+  } catch {
+    return `<code>${escapeHtml(tex)}</code>`;
+  }
+}
+
 function renderInline(text: string): string {
-  return escapeHtml(text).replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>");
+  // Pull out $...$ math spans before escaping, render them with KaTeX
+  return escapeHtml(text)
+    .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
+    .replace(/\$((?:[^$\\]|\\.)+)\$/g, (_, tex) => renderMath(unescapeHtml(tex), false));
+}
+
+function unescapeHtml(value: string): string {
+  return value
+    .replaceAll("&amp;", "&")
+    .replaceAll("&lt;", "<")
+    .replaceAll("&gt;", ">");
 }
 
 function render(): void {

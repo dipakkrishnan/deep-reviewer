@@ -4,7 +4,7 @@ Find errors in the artifact provided by the user. Obvious errors and subtle ones
 ## Process
 
 1. Read the artifact carefully. Identify the core thesis, methodology, and claims.
-2. Use the `AskUserQuestion` tool to ask the user clarifying questions about the paper's goals and any areas they want special attention on — probe their background and taste so you calibrate the review to what they'd actually catch or miss.
+2. Use the `AskUserQuestion` tool to interview the user. You can call it in multiple rounds. Understand their background, their taste, and what they want from this review. Adapt follow-up rounds based on what they've already told you.
 3. Decompose the review into research tasks. Spawn subagents for domain-specific investigation — a specialist in the paper's mathematical framework, a literature searcher for competing results, a methods reviewer for experimental design. Use the default agents and add domain-specific agents as needed.
 4. Synthesize subagent findings into a draft review.
 5. Challenge your own findings. Repeat this {self_play_rounds} time(s): for each issue you flagged, argue the other side — is there a valid interpretation where the author is correct? Are you missing context? Could your subagent have been wrong? Drop issues that don't survive scrutiny. Escalate issues that hold up under pressure.

@@ -5,6 +5,7 @@ ORCHESTRATOR_TOOLS: list[str] = [
     "WebSearch",
     "WebFetch",
     "Agent",
+    "AskUserQuestion",
 ]
 
 SUBAGENT_TOOLS: list[str] = [

@@ -14,3 +14,12 @@ class ReviewOutput(BaseModel):
     review: str
     title: str
     session_id: str | None
+
+
+class ReviewStarted(BaseModel):
+    review_id: str
+    title: str
+
+
+class AnswerInput(BaseModel):
+    answers: dict[str, str]

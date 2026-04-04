@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -98,3 +99,100 @@ async def run_agent(
         return AgentResult(text=result_text, session_id=captured_session_id)
 
     raise NotImplementedError(f"Unsupported provider: {provider}")
+
+
+@dataclass
+class StreamSession:
+    """Shared state for pause/resume coordination during streamed runs."""
+
+    events: asyncio.Queue
+    answer_event: asyncio.Event
+    answer_slot: dict | None = None
+
+
+def _build_can_use_tool_streamed(session: StreamSession):
+    """Return a can_use_tool callback that streams questions and waits for answers."""
+
+    async def can_use_tool(
+        tool_name: str, input_data: dict, context: ToolPermissionContext
+    ) -> PermissionResultAllow | PermissionResultDeny:
+        if tool_name == "AskUserQuestion":
+            questions = input_data.get("questions", [])
+            log.info("Agent asking %d question(s), pausing for user", len(questions))
+            await session.events.put(
+                {"type": "status", "status": "waiting for interview answers"}
+            )
+            await session.events.put({"type": "questions", "questions": questions})
+            await session.answer_event.wait()
+            session.answer_event.clear()
+            answers = session.answer_slot or {}
+            session.answer_slot = None
+            log.info("User answered, resuming agent")
+            await session.events.put(
+                {"type": "status", "status": "interview complete, resuming review"}
+            )
+            return PermissionResultAllow(
+                updated_input={"questions": questions, "answers": answers}
+            )
+        return PermissionResultAllow(updated_input=input_data)
+
+    return can_use_tool
+
+
+async def run_agent_streamed(
+    system_prompt: str,
+    user_prompt: str,
+    session: StreamSession,
+    model: str = "claude-opus-4-6",
+    cwd: str | None = None,
+    provider: str = "anthropic",
+) -> None:
+    """Run a prompt through the Claude Agent SDK, pushing events to session.events."""
+    log.info("Starting streamed review — model=%s provider=%s", model, provider)
+    if provider != "anthropic":
+        await session.events.put(
+            {"type": "error", "message": f"Unsupported provider: {provider}"}
+        )
+        await session.events.put({"type": "done"})
+        return
+
+    try:
+        if cwd:
+            Path(cwd).mkdir(parents=True, exist_ok=True)
+        options = ClaudeAgentOptions(
+            allowed_tools=ORCHESTRATOR_TOOLS,
+            permission_mode="bypassPermissions",
+            system_prompt=system_prompt,
+            model=model,
+            cwd=cwd,
+            can_use_tool=_build_can_use_tool_streamed(session),
+            hooks={
+                "PreToolUse": [HookMatcher(matcher=None, hooks=[_dummy_hook])]
+            },
+        )
+
+        async def prompt_stream():
+            yield {
+                "type": "user",
+                "message": {"role": "user", "content": user_prompt},
+            }
+
+        await session.events.put({"type": "status", "status": "running"})
+        async for message in query(prompt=prompt_stream(), options=options):
+            if isinstance(message, SystemMessage) and message.subtype == "init":
+                sid = message.data.get("session_id")
+                log.info("Session established: %s", sid)
+                await session.events.put(
+                    {"type": "status", "status": "running", "session_id": sid}
+                )
+            if isinstance(message, ResultMessage):
+                log.info("Agent finished — result length=%d chars", len(message.result))
+                await session.events.put(
+                    {"type": "status", "status": "final review ready"}
+                )
+                await session.events.put({"type": "result", "text": message.result})
+    except Exception as exc:
+        log.exception("Agent loop failed")
+        await session.events.put({"type": "error", "message": str(exc)})
+    finally:
+        await session.events.put({"type": "done"})

@@ -56,6 +56,7 @@ class AgentSettings(BaseModel):
     model: str
     subagent_count: int = Field(gt=0)
     self_play_rounds: int = Field(gt=0)
+    workspace: str = "/tmp/deep-review-workspace"
 
     @classmethod
     def from_request(cls, request: ReviewRequest) -> "AgentSettings":

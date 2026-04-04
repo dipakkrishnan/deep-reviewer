@@ -9,3 +9,4 @@ dist/
 *.pdf
 CLAUDE.md
 PRODUCT_DESIGN.md
+ui/node_modules/

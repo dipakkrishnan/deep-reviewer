@@ -447,6 +447,7 @@ dependencies = [
     { name = "httpx" },
     { name = "pydantic" },
     { name = "pymupdf" },
+    { name = "uvicorn" },
 ]
 
 [package.dev-dependencies]
@@ -462,6 +463,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "pydantic", specifier = ">=2.12.5" },
     { name = "pymupdf", specifier = ">=1.27.2.2" },
+    { name = "uvicorn", specifier = ">=0.34.0" },
 ]
 
 [package.metadata.requires-dev]

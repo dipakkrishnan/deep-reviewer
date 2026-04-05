@@ -6,14 +6,18 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, SystemMessage, query
-
-log = logging.getLogger("deep-review")
 from claude_agent_sdk.types import (
+    AssistantMessage,
     HookMatcher,
     PermissionResultAllow,
     PermissionResultDeny,
+    TaskProgressMessage,
+    TaskStartedMessage,
     ToolPermissionContext,
+    ToolUseBlock,
 )
+
+log = logging.getLogger("deep-review")
 
 from agent.claude_tools import ORCHESTRATOR_TOOLS
 from telemetry import append_event, update_run
@@ -170,6 +174,20 @@ def _build_can_use_tool_streamed(session: StreamSession):
     return can_use_tool
 
 
+def _summarize_tool_input(name: str, input_data: dict) -> str:
+    """Return a short human-readable preview of what a tool call is doing."""
+    if name == "WebSearch":
+        return input_data.get("query", name)
+    if name == "WebFetch":
+        return input_data.get("url", name)
+    if name == "Read":
+        return input_data.get("file_path", name)
+    if name == "Agent":
+        prompt = input_data.get("prompt", "")
+        return prompt[:80] + ("..." if len(prompt) > 80 else "")
+    return name
+
+
 async def run_agent_streamed(
     system_prompt: str,
     user_prompt: str,
@@ -235,6 +253,26 @@ async def run_agent_streamed(
                 await session.events.put(
                     {"type": "status", "status": "running", "session_id": sid}
                 )
+            if isinstance(message, AssistantMessage):
+                for block in message.content:
+                    if isinstance(block, ToolUseBlock):
+                        await session.events.put({
+                            "type": "progress",
+                            "tool": block.name,
+                            "input_preview": _summarize_tool_input(block.name, block.input),
+                        })
+            if isinstance(message, TaskStartedMessage):
+                await session.events.put({
+                    "type": "progress",
+                    "tool": "Agent",
+                    "input_preview": message.description,
+                })
+            if isinstance(message, TaskProgressMessage):
+                await session.events.put({
+                    "type": "progress",
+                    "tool": message.last_tool_name or "Agent",
+                    "input_preview": message.description,
+                })
             if isinstance(message, ResultMessage):
                 log.info("Agent finished — result length=%d chars", len(message.result))
                 result_emitted = True

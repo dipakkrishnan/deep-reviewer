@@ -13,6 +13,7 @@ type Question = {
 type StreamEvent =
   | { type: "status"; status?: string; session_id?: string }
   | { type: "questions"; questions?: Question[] }
+  | { type: "progress"; tool?: string; input_preview?: string }
   | { type: "result"; text?: string }
   | { type: "error"; message?: string }
   | { type: "done" };
@@ -28,6 +29,7 @@ type AppState = {
   questions: Question[];
   answers: Record<string, string>;
   resultText: string;
+  progress: Array<{ tool: string; detail: string }>;
   log: string[];
 };
 
@@ -42,6 +44,7 @@ const state: AppState = {
   questions: [],
   answers: {},
   resultText: "",
+  progress: [],
   log: [
     "Upload a paper, start the task, answer the interview, and wait for the final review artifact."
   ]
@@ -147,7 +150,7 @@ function render(): void {
           <div class="task-head">
             <div>
               <p class="panel-kicker">Task</p>
-              <h2>${escapeHtml(state.title)}</h2>
+              <h2>${escapeHtml(prettifyTitle(state.title))}</h2>
             </div>
             <div class="status-chip">${escapeHtml(state.statusText)}</div>
           </div>
@@ -259,20 +262,24 @@ function renderTaskBody(): string {
   }
 
   if (state.stage === "running") {
+    const feedItems = state.progress
+      .map(
+        (p) =>
+          `<li><span class="feed-tool">${escapeHtml(p.tool)}</span> ${escapeHtml(p.detail)}</li>`
+      )
+      .join("");
+
     return `
       <div class="body-block run-block">
         <div class="section-intro">
           <p class="panel-kicker">In Progress</p>
           <h3>Review underway</h3>
-          <p>The orchestrator is gathering context, checking the artifact, and synthesizing a final review artifact.</p>
         </div>
         <div class="progress-card">
           <div class="pulse"></div>
-          <div>
-            <strong>${escapeHtml(state.statusText)}</strong>
-            <p>When the interview is complete, the system continues automatically and renders the final review below once done.</p>
-          </div>
+          <strong>${escapeHtml(state.statusText)}</strong>
         </div>
+        ${feedItems ? `<ul class="progress-feed">${feedItems}</ul>` : ""}
       </div>
     `;
   }
@@ -312,6 +319,7 @@ async function startReview(): Promise<void> {
   state.stage = "running";
   state.statusText = "Launching review run...";
   state.resultText = "";
+  state.progress = [];
   state.reviewId = null;
   state.sessionId = null;
   state.log.unshift(`Submitting artifact: ${state.source}`);
@@ -369,6 +377,12 @@ function handleEvent(event: StreamEvent): void {
       state.sessionId = event.session_id;
     }
     state.log.unshift(`Status: ${state.statusText}`);
+  }
+
+  if (event.type === "progress") {
+    const entry = { tool: event.tool ?? "Agent", detail: event.input_preview ?? "" };
+    state.progress.unshift(entry);
+    if (state.progress.length > 30) state.progress.length = 30;
   }
 
   if (event.type === "questions") {
@@ -446,6 +460,17 @@ function readableMode(mode: ReviewMode): string {
   if (mode === "quick") return "Quick scan";
   if (mode === "deep") return "Deep review";
   return "Standard review";
+}
+
+function prettifyTitle(title: string): string {
+  const cleaned = title
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!cleaned) {
+    return "Deep Review";
+  }
+  return cleaned.replace(/\b\w/g, (match) => match.toUpperCase());
 }
 
 function intensityCopy(mode: ReviewMode): string {

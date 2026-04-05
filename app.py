@@ -4,7 +4,6 @@ import logging
 import uuid
 from pathlib import Path
 
-from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from starlette.responses import StreamingResponse
@@ -15,14 +14,16 @@ from app_models import AnswerInput, ReviewInput, ReviewStarted
 from prompts.orchestrator import ORCHESTRATOR_PROMPT
 from telemetry import append_event, create_run, update_run
 from utils import load_artifact
-
-load_dotenv()
+# from dotenv import load_dotenv
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
 )
 log = logging.getLogger("deep-review")
+
+# Note(Dipak): re-enable to use Anthropic API directly
+# load_dotenv()
 
 app = FastAPI()
 

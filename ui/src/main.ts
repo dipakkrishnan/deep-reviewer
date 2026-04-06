@@ -240,7 +240,7 @@ function render(): void {
           <section class="auth-card glass">
             <p class="eyebrow">Deep Review</p>
             <h1>Enter access key</h1>
-            <p class="auth-copy">This deployment is protected by a shared access key.</p>
+            <p class="auth-copy">Deep Review is protected by a shared access key.</p>
             <form class="auth-form" id="auth-form">
               <label class="field">
                 <span>Access key</span>

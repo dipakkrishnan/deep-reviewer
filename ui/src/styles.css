@@ -264,6 +264,21 @@ select {
   transform: translateY(-1px);
 }
 
+.secondary {
+  padding: 13px 18px;
+  border: 1px solid rgba(255, 211, 158, 0.4);
+  border-radius: 14px;
+  cursor: pointer;
+  color: #ffd39e;
+  background: transparent;
+  transition: transform 140ms ease;
+}
+
+.secondary:hover {
+  transform: translateY(-1px);
+  background: rgba(255, 211, 158, 0.08);
+}
+
 .section-intro p,
 .progress-card p,
 .report p {

@@ -434,6 +434,7 @@ function renderTaskBody(): string {
         <h3>Final review</h3>
         <p>The task is complete. This review artifact is ready to read, inspect, and use.</p>
       </div>
+      ${state.reviewId ? `<div class="action-row"><button class="secondary" id="download-artifact">Download review</button></div>` : ""}
       <article class="report">
         ${state.resultText ? markdownToHtml(state.resultText) : "<p>No final artifact received yet.</p>"}
       </article>
@@ -489,6 +490,7 @@ function bindEvents(): void {
   });
 
   document.querySelector<HTMLButtonElement>("#start-review")?.addEventListener("click", startReview);
+  document.querySelector<HTMLButtonElement>("#download-artifact")?.addEventListener("click", downloadArtifact);
   document.querySelector<HTMLFormElement>("#answer-form")?.addEventListener("submit", submitAnswers);
 }
 
@@ -636,6 +638,19 @@ async function submitAnswers(event: SubmitEvent): Promise<void> {
     state.log.unshift(error instanceof Error ? error.message : "Unknown answer error");
     render();
   }
+}
+
+async function downloadArtifact(): Promise<void> {
+  if (!state.reviewId) return;
+  const resp = await authFetch(`/review/${state.reviewId}/artifact`);
+  if (!resp.ok) return;
+  const blob = await resp.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${state.reviewId}.md`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 function closeStream(): void {

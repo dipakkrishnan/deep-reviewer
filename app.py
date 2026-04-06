@@ -7,13 +7,12 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request, UploadFile
 from fastapi.staticfiles import StaticFiles
-from starlette.responses import JSONResponse, StreamingResponse
+from starlette.responses import FileResponse, JSONResponse, StreamingResponse
 
 from agent.config_models import AgentSettings, ReviewRequest
-from agent.runtime import StreamSession, run_agent_streamed
 from app_models import AnswerInput, ReviewInput, ReviewStarted
 from prompts.orchestrator import ORCHESTRATOR_PROMPT
-from telemetry import append_event, create_run, update_run
+from telemetry import RUNS_DIR, append_event, create_run, update_run
 from utils import load_artifact
 from dotenv import load_dotenv
 
@@ -25,6 +24,8 @@ log = logging.getLogger("deep-review")
 
 # Note(Dipak): re-enable to use Anthropic API directly
 load_dotenv()
+
+from agent.runtime import StreamSession, run_agent_streamed
 
 app = FastAPI()
 
@@ -195,6 +196,14 @@ async def answer_questions(review_id: str, body: AnswerInput):
     await session.events.put({"type": "status", "status": "answers received"})
     session.answer_event.set()
     return {"status": "ok"}
+
+
+@app.get("/review/{review_id}/artifact")
+async def download_artifact(review_id: str):
+    path = RUNS_DIR / f"{review_id}.md"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Artifact not found")
+    return FileResponse(path, media_type="text/markdown", filename=f"{review_id}.md")
 
 
 if UI_DIST.exists():

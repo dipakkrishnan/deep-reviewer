@@ -35,7 +35,6 @@ type AppState = {
   resultText: string;
   progress: Array<{ tool: string; detail: string }>;
   uploadedFilename: string | null;
-  log: string[];
 };
 
 const state: AppState = {
@@ -55,9 +54,6 @@ const state: AppState = {
   resultText: "",
   progress: [],
   uploadedFilename: null,
-  log: [
-    "Upload a paper, start the task, answer the interview, and wait for the final review artifact."
-  ]
 };
 
 let stream: EventSource | null = null;
@@ -275,33 +271,42 @@ function render(): void {
               <p class="panel-kicker">Task</p>
               <h2>${escapeHtml(prettifyTitle(state.title))}</h2>
             </div>
-            <div class="status-chip">${escapeHtml(state.statusText)}</div>
+            <div class="task-head-controls">
+              ${state.stage === "ready"
+                ? `
+                  <label class="field field-depth field-head">
+                    <span class="field-label-row">
+                      <span>Review depth</span>
+                      <button
+                        type="button"
+                        class="info-trigger"
+                        aria-label="Explain review depth"
+                        aria-describedby="mode-help"
+                      >?</button>
+                    </span>
+                    <div class="select-shell">
+                      <select id="mode">
+                        ${[
+                          { value: "quick", label: "Quick scan" },
+                          { value: "standard", label: "Standard review" },
+                          { value: "deep", label: "Deep review" }
+                        ]
+                          .map(
+                            ({ value, label }) =>
+                              `<option value="${value}" ${state.mode === value ? "selected" : ""}>${label}</option>`
+                          )
+                          .join("")}
+                      </select>
+                    </div>
+                    <span class="tooltip-bubble" id="mode-help" role="tooltip">${escapeHtml(intensityCopy(state.mode))}</span>
+                  </label>
+                `
+                : ""}
+              <div class="status-chip">${escapeHtml(state.statusText)}</div>
+            </div>
           </div>
 
           ${renderTaskBody()}
-        </section>
-
-        <section class="meta-panel glass">
-          <div class="meta-section">
-            <div class="panel-head">
-              <p class="panel-kicker">Review</p>
-              <h3>Status</h3>
-            </div>
-            <dl class="meta-list">
-              <div><dt>Current phase</dt><dd>${escapeHtml(productPhase(state.stage))}</dd></div>
-              <div><dt>Depth</dt><dd>${escapeHtml(readableMode(state.mode))}</dd></div>
-              <div><dt>Interview</dt><dd>${escapeHtml(interviewStatus(state.stage, state.questions.length))}</dd></div>
-            </dl>
-          </div>
-          <div class="meta-section">
-            <div class="panel-head">
-              <p class="panel-kicker">What’s happening</p>
-              <h3>Timeline</h3>
-            </div>
-            <ul class="log-list">
-              ${state.log.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
-            </ul>
-          </div>
         </section>
       </main>
     </div>
@@ -320,27 +325,6 @@ function renderTaskBody(): string {
             <h3>Upload the paper</h3>
           </div>
 
-          <div class="ready-settings">
-            <label class="field field-depth field-compact">
-              <span>Review depth</span>
-              <div class="select-shell">
-                <select id="mode">
-                  ${[
-                    { value: "quick", label: "Quick scan" },
-                    { value: "standard", label: "Standard review" },
-                    { value: "deep", label: "Deep review" }
-                  ]
-                    .map(
-                      ({ value, label }) =>
-                        `<option value="${value}" ${state.mode === value ? "selected" : ""}>${label}</option>`
-                    )
-                    .join("")}
-                </select>
-              </div>
-            </label>
-            <p class="ready-tip">${escapeHtml(intensityCopy(state.mode))}</p>
-          </div>
-
           <div class="field field-paper">
             <div class="drop-zone" id="drop-zone">
               <input type="file" id="file-input" accept=".pdf" hidden />
@@ -353,7 +337,6 @@ function renderTaskBody(): string {
             <input id="source" value="${escapeHtml(state.sourceInput)}" placeholder="https://arxiv.org/abs/..." />
             <div class="artifact-footer artifact-footer-simple">
               <button class="primary" id="start-review">Start Review</button>
-              <p class="artifact-hint">${escapeHtml(artifactHint(state.uploadedFilename, state.sourceInput))}</p>
             </div>
           </div>
         </section>
@@ -447,14 +430,13 @@ async function uploadFile(file: File): Promise<void> {
   const resp = await authFetch("/upload", { method: "POST", body: form });
   if (!resp.ok) {
     const msg = await readErrorMessage(resp, "Upload failed");
-    state.log.unshift(msg);
     render();
     return;
   }
   const data = (await resp.json()) as { path: string; filename: string };
   state.uploadedSource = data.path;
   state.uploadedFilename = data.filename;
-  state.log.unshift(`Uploaded: ${data.filename}`);
+
   render();
 }
 
@@ -502,7 +484,7 @@ async function startReview(): Promise<void> {
   state.reviewId = null;
   state.sessionId = null;
   const source = state.uploadedSource ?? state.sourceInput.trim();
-  state.log.unshift(`Submitting artifact: ${source}`);
+
   render();
 
   try {
@@ -525,13 +507,13 @@ async function startReview(): Promise<void> {
     state.reviewId = data.review_id;
     state.title = data.title;
     state.statusText = "Review started. Waiting for stream.";
-    state.log.unshift(`Review started: ${data.review_id}`);
+
     openStream(data.review_id);
     render();
   } catch (error) {
     state.stage = "ready";
     state.statusText = "Could not reach backend.";
-    state.log.unshift(error instanceof Error ? error.message : "Unknown launch error");
+
     render();
   }
 }
@@ -548,11 +530,10 @@ function openStream(reviewId: string): void {
   stream.onerror = () => {
     if (stream?.readyState === EventSource.CLOSED && !state.resultText && state.stage !== "ready") {
       clearAccessKey();
-      state.log.unshift("Access key rejected.");
       render();
       return;
     }
-    state.log.unshift("Stream disconnected.");
+
     closeStream();
     render();
   };
@@ -564,7 +545,7 @@ function handleEvent(event: StreamEvent): void {
     if (event.session_id) {
       state.sessionId = event.session_id;
     }
-    state.log.unshift(`Status: ${state.statusText}`);
+
   }
 
   if (event.type === "progress") {
@@ -578,20 +559,20 @@ function handleEvent(event: StreamEvent): void {
     state.answers = {};
     state.stage = "interview";
     state.statusText = "Interview waiting on answers.";
-    state.log.unshift("AskUserQuestion received from backend.");
+
   }
 
   if (event.type === "result") {
     state.resultText = event.text ?? "";
     state.stage = "complete";
     state.statusText = "Review complete.";
-    state.log.unshift("Final review artifact received.");
+
   }
 
   if (event.type === "error") {
     state.stage = "ready";
     state.statusText = "Run failed.";
-    state.log.unshift(event.message ?? "Unknown backend error");
+
   }
 
   render();
@@ -600,7 +581,7 @@ function handleEvent(event: StreamEvent): void {
 async function submitAnswers(event: SubmitEvent): Promise<void> {
   event.preventDefault();
   if (!state.reviewId) {
-    state.log.unshift("No active review found for answer submission.");
+
     render();
     return;
   }
@@ -618,7 +599,7 @@ async function submitAnswers(event: SubmitEvent): Promise<void> {
   state.answers = answers;
   state.stage = "running";
   state.statusText = "Submitting interview answers...";
-  state.log.unshift("Interview answers submitted.");
+
   render();
 
   try {
@@ -634,7 +615,7 @@ async function submitAnswers(event: SubmitEvent): Promise<void> {
   } catch (error) {
     state.stage = "interview";
     state.statusText = "Answer submission failed.";
-    state.log.unshift(error instanceof Error ? error.message : "Unknown answer error");
+
     render();
   }
 }
@@ -712,28 +693,7 @@ async function bootstrap(): Promise<void> {
   }
 }
 
-function readableMode(mode: ReviewMode): string {
-  if (mode === "quick") return "Quick scan";
-  if (mode === "deep") return "Deep review";
-  return "Standard review";
-}
 
-function productPhase(stage: Stage): string {
-  if (stage === "interview") return "Interview";
-  if (stage === "running") return "Review in progress";
-  if (stage === "complete") return "Final artifact ready";
-  return "Ready to launch";
-}
-
-function interviewStatus(stage: Stage, questionCount: number): string {
-  if (stage === "interview") {
-    return questionCount > 0 ? `${questionCount} questions waiting` : "Waiting";
-  }
-  if (stage === "running" || stage === "complete") {
-    return questionCount > 0 ? "Completed" : "Not needed yet";
-  }
-  return "Not started";
-}
 
 function prettifyTitle(title: string): string {
   const cleaned = title
@@ -754,16 +714,6 @@ function intensityCopy(mode: ReviewMode): string {
     return "Highest scrutiny. Broader search, stronger adversarial checking, slower turnaround.";
   }
   return "Balanced depth. Strong default for most serious paper reviews.";
-}
-
-function artifactHint(uploadedFilename: string | null, source: string): string {
-  if (uploadedFilename) {
-    return "Using the uploaded PDF.";
-  }
-  if (source) {
-    return "Using the provided link.";
-  }
-  return "PDF upload is the most reliable path.";
 }
 
 async function readErrorMessage(response: Response, fallback: string): Promise<string> {

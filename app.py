@@ -1,12 +1,13 @@
 import asyncio
 import json
 import logging
+import os
 import uuid
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, UploadFile
 from fastapi.staticfiles import StaticFiles
-from starlette.responses import StreamingResponse
+from starlette.responses import JSONResponse, StreamingResponse
 
 from agent.config_models import AgentSettings, ReviewRequest
 from agent.runtime import StreamSession, run_agent_streamed
@@ -29,6 +30,56 @@ app = FastAPI()
 
 sessions: dict[str, StreamSession] = {}
 UI_DIST = Path(__file__).parent / "ui" / "dist"
+UPLOAD_DIR = Path("/tmp/deep-review-uploads")
+SHARED_SECRET = os.getenv("DEEP_REVIEW_SECRET")
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _is_authorized(request: Request) -> bool:
+    if not SHARED_SECRET:
+        return True
+
+    auth_header = request.headers.get("authorization", "")
+    if auth_header == f"Bearer {SHARED_SECRET}":
+        return True
+
+    if request.url.path.endswith("/stream") and request.query_params.get("token") == SHARED_SECRET:
+        return True
+
+    return False
+
+
+@app.middleware("http")
+async def require_shared_secret(request: Request, call_next):
+    protected_paths = (
+        "/upload",
+        "/review",
+    )
+    if any(request.url.path == path or request.url.path.startswith(f"{path}/") for path in protected_paths):
+        if not _is_authorized(request):
+            return JSONResponse({"detail": "Unauthorized"}, status_code=401)
+    return await call_next(request)
+
+
+@app.get("/auth/config")
+async def auth_config():
+    return {"auth_required": bool(SHARED_SECRET)}
+
+
+MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
+
+
+@app.post("/upload")
+async def upload_pdf(file: UploadFile):
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Only PDF files are accepted")
+    content = await file.read()
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="File too large (50 MB limit)")
+    dest = UPLOAD_DIR / f"{uuid.uuid4()}.pdf"
+    dest.write_bytes(content)
+    log.info("Uploaded %s → %s (%d bytes)", file.filename, dest, len(content))
+    return {"path": str(dest), "filename": file.filename}
 
 
 @app.post("/review", response_model=ReviewStarted)

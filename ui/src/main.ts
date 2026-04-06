@@ -19,6 +19,9 @@ type StreamEvent =
   | { type: "done" };
 
 type AppState = {
+  accessKey: string | null;
+  authChecked: boolean;
+  authRequired: boolean;
   stage: Stage;
   reviewId: string | null;
   sessionId: string | null;
@@ -30,27 +33,33 @@ type AppState = {
   answers: Record<string, string>;
   resultText: string;
   progress: Array<{ tool: string; detail: string }>;
+  uploadedFilename: string | null;
   log: string[];
 };
 
 const state: AppState = {
+  accessKey: sessionStorage.getItem("deep-review-access-key"),
+  authChecked: false,
+  authRequired: false,
   stage: "ready",
   reviewId: null,
   sessionId: null,
   title: "Deep Review",
   statusText: "Ready to launch a review.",
-  source: "./paper_clean_final.pdf",
+  source: "",
   mode: "standard",
   questions: [],
   answers: {},
   resultText: "",
   progress: [],
+  uploadedFilename: null,
   log: [
     "Upload a paper, start the task, answer the interview, and wait for the final review artifact."
   ]
 };
 
 let stream: EventSource | null = null;
+const ACCESS_KEY_STORAGE = "deep-review-access-key";
 
 function escapeHtml(value: string): string {
   return value
@@ -201,6 +210,52 @@ function render(): void {
   const app = document.querySelector<HTMLDivElement>("#app");
   if (!app) return;
 
+  if (!state.authChecked) {
+    app.innerHTML = `
+      <div class="shell shell-auth">
+        <div class="backdrop backdrop-a"></div>
+        <div class="backdrop backdrop-b"></div>
+
+        <main class="auth-layout">
+          <section class="auth-card glass">
+            <p class="eyebrow">Deep Review</p>
+            <h1>Loading</h1>
+            <p class="auth-copy">Checking access requirements.</p>
+          </section>
+        </main>
+      </div>
+    `;
+    return;
+  }
+
+  if (state.authRequired && !state.accessKey) {
+    app.innerHTML = `
+      <div class="shell shell-auth">
+        <div class="backdrop backdrop-a"></div>
+        <div class="backdrop backdrop-b"></div>
+
+        <main class="auth-layout">
+          <section class="auth-card glass">
+            <p class="eyebrow">Deep Review</p>
+            <h1>Enter access key</h1>
+            <p class="auth-copy">This deployment is protected by a shared access key.</p>
+            <form class="auth-form" id="auth-form">
+              <label class="field">
+                <span>Access key</span>
+                <input id="access-key" name="access-key" type="password" autocomplete="current-password" autofocus />
+              </label>
+              <div class="action-row action-row-inline">
+                <button class="primary" type="submit">Continue</button>
+              </div>
+            </form>
+          </section>
+        </main>
+      </div>
+    `;
+    bindEvents();
+    return;
+  }
+
   app.innerHTML = `
     <div class="shell">
       <div class="backdrop backdrop-a"></div>
@@ -226,22 +281,26 @@ function render(): void {
         </section>
 
         <section class="meta-panel glass">
-          <div class="panel-head">
-            <p class="panel-kicker">Review</p>
-            <h3>Status</h3>
+          <div class="meta-section">
+            <div class="panel-head">
+              <p class="panel-kicker">Review</p>
+              <h3>Status</h3>
+            </div>
+            <dl class="meta-list">
+              <div><dt>Current phase</dt><dd>${escapeHtml(productPhase(state.stage))}</dd></div>
+              <div><dt>Depth</dt><dd>${escapeHtml(readableMode(state.mode))}</dd></div>
+              <div><dt>Interview</dt><dd>${escapeHtml(interviewStatus(state.stage, state.questions.length))}</dd></div>
+            </dl>
           </div>
-          <dl class="meta-list">
-            <div><dt>Current phase</dt><dd>${escapeHtml(productPhase(state.stage))}</dd></div>
-            <div><dt>Depth</dt><dd>${escapeHtml(readableMode(state.mode))}</dd></div>
-            <div><dt>Interview</dt><dd>${escapeHtml(interviewStatus(state.stage, state.questions.length))}</dd></div>
-          </dl>
-          <div class="panel-head panel-head-secondary">
-            <p class="panel-kicker">What’s happening</p>
-            <h3>Timeline</h3>
+          <div class="meta-section">
+            <div class="panel-head">
+              <p class="panel-kicker">What’s happening</p>
+              <h3>Timeline</h3>
+            </div>
+            <ul class="log-list">
+              ${state.log.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+            </ul>
           </div>
-          <ul class="log-list">
-            ${state.log.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
-          </ul>
         </section>
       </main>
     </div>
@@ -254,34 +313,49 @@ function renderTaskBody(): string {
   if (state.stage === "ready") {
     return `
       <div class="body-block">
-        <div class="setup-grid">
-          <label class="field">
-            <span>Paper path or arXiv URL</span>
-            <input id="source" value="${escapeHtml(state.source)}" placeholder="/path/to/paper.pdf or https://arxiv.org/abs/..." />
-          </label>
-          <label class="field">
-            <span>Review depth</span>
-            <select id="mode">
-              ${[
-                { value: "quick", label: "Quick scan" },
-                { value: "standard", label: "Standard review" },
-                { value: "deep", label: "Deep review" }
-              ]
-                .map(
-                  ({ value, label }) =>
-                    `<option value="${value}" ${state.mode === value ? "selected" : ""}>${label}</option>`
-                )
-                .join("")}
-            </select>
-          </label>
-          <label class="field">
-            <span>Intensity</span>
-            <p class="field-note">${escapeHtml(intensityCopy(state.mode))}</p>
-          </label>
-        </div>
-        <div class="action-row">
-          <button class="primary" id="start-review">Start Review</button>
-        </div>
+        <section class="artifact-card artifact-card-simple">
+          <div class="section-intro section-intro-tight">
+            <p class="panel-kicker">Artifact</p>
+            <h3>Upload the paper</h3>
+          </div>
+
+          <div class="ready-settings">
+            <label class="field field-depth field-compact">
+              <span>Review depth</span>
+              <div class="select-shell">
+                <select id="mode">
+                  ${[
+                    { value: "quick", label: "Quick scan" },
+                    { value: "standard", label: "Standard review" },
+                    { value: "deep", label: "Deep review" }
+                  ]
+                    .map(
+                      ({ value, label }) =>
+                        `<option value="${value}" ${state.mode === value ? "selected" : ""}>${label}</option>`
+                    )
+                    .join("")}
+                </select>
+              </div>
+            </label>
+            <p class="ready-tip">${escapeHtml(intensityCopy(state.mode))}</p>
+          </div>
+
+          <div class="field field-paper">
+            <div class="drop-zone" id="drop-zone">
+              <input type="file" id="file-input" accept=".pdf" hidden />
+              ${state.uploadedFilename
+                ? `<p class="drop-label">✓ ${escapeHtml(state.uploadedFilename)}</p>`
+                : `<p class="drop-label">Drop a PDF here or <button type="button" class="link-btn" id="pick-file">choose file</button></p>`
+              }
+            </div>
+            <span class="field-divider">or paste a paper link</span>
+            <input id="source" value="${escapeHtml(state.source)}" placeholder="https://arxiv.org/abs/..." />
+            <div class="artifact-footer artifact-footer-simple">
+              <button class="primary" id="start-review">Start Review</button>
+              <p class="artifact-hint">${escapeHtml(artifactHint(state.uploadedFilename, state.source))}</p>
+            </div>
+          </div>
+        </section>
       </div>
     `;
   }
@@ -365,10 +439,46 @@ function renderTaskBody(): string {
   `;
 }
 
+async function uploadFile(file: File): Promise<void> {
+  const form = new FormData();
+  form.append("file", file);
+  const resp = await authFetch("/upload", { method: "POST", body: form });
+  if (!resp.ok) {
+    const msg = await readErrorMessage(resp, "Upload failed");
+    state.log.unshift(msg);
+    render();
+    return;
+  }
+  const data = (await resp.json()) as { path: string; filename: string };
+  state.source = data.path;
+  state.uploadedFilename = data.filename;
+  state.log.unshift(`Uploaded: ${data.filename}`);
+  render();
+}
+
 function bindEvents(): void {
+  document.querySelector<HTMLFormElement>("#auth-form")?.addEventListener("submit", submitAccessKey);
+
   const source = document.querySelector<HTMLInputElement>("#source");
   source?.addEventListener("change", () => {
     state.source = source.value.trim();
+    state.uploadedFilename = null;
+  });
+
+  const dropZone = document.querySelector<HTMLDivElement>("#drop-zone");
+  const fileInput = document.querySelector<HTMLInputElement>("#file-input");
+  document.querySelector<HTMLButtonElement>("#pick-file")?.addEventListener("click", () => fileInput?.click());
+  fileInput?.addEventListener("change", () => {
+    const file = fileInput.files?.[0];
+    if (file) uploadFile(file);
+  });
+  dropZone?.addEventListener("dragover", (e) => { e.preventDefault(); dropZone.classList.add("drag-active"); });
+  dropZone?.addEventListener("dragleave", () => dropZone.classList.remove("drag-active"));
+  dropZone?.addEventListener("drop", (e) => {
+    e.preventDefault();
+    dropZone.classList.remove("drag-active");
+    const file = e.dataTransfer?.files[0];
+    if (file) uploadFile(file);
   });
 
   const mode = document.querySelector<HTMLSelectElement>("#mode");
@@ -393,7 +503,7 @@ async function startReview(): Promise<void> {
   render();
 
   try {
-    const response = await fetch("/review", {
+    const response = await authFetch("/review", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -424,13 +534,20 @@ async function startReview(): Promise<void> {
 
 function openStream(reviewId: string): void {
   closeStream();
-  stream = new EventSource(`/review/${reviewId}/stream`);
+  const token = encodeURIComponent(state.accessKey ?? "");
+  stream = new EventSource(`/review/${reviewId}/stream?token=${token}`);
 
   stream.onmessage = (event) => {
     handleEvent(JSON.parse(event.data) as StreamEvent);
   };
 
   stream.onerror = () => {
+    if (stream?.readyState === EventSource.CLOSED && !state.resultText && state.stage !== "ready") {
+      clearAccessKey();
+      state.log.unshift("Access key rejected.");
+      render();
+      return;
+    }
     state.log.unshift("Stream disconnected.");
     closeStream();
     render();
@@ -501,7 +618,7 @@ async function submitAnswers(event: SubmitEvent): Promise<void> {
   render();
 
   try {
-    const response = await fetch(`/review/${state.reviewId}/answer`, {
+    const response = await authFetch(`/review/${state.reviewId}/answer`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ answers })
@@ -521,6 +638,61 @@ async function submitAnswers(event: SubmitEvent): Promise<void> {
 function closeStream(): void {
   stream?.close();
   stream = null;
+}
+
+async function submitAccessKey(event: SubmitEvent): Promise<void> {
+  event.preventDefault();
+  const form = event.currentTarget as HTMLFormElement;
+  const formData = new FormData(form);
+  const accessKey = formData.get("access-key")?.toString().trim() ?? "";
+  if (!accessKey) {
+    return;
+  }
+  state.accessKey = accessKey;
+  sessionStorage.setItem(ACCESS_KEY_STORAGE, accessKey);
+  render();
+}
+
+async function authFetch(input: string, init: RequestInit = {}): Promise<Response> {
+  const headers = new Headers(init.headers);
+  if (state.accessKey) {
+    headers.set("Authorization", `Bearer ${state.accessKey}`);
+  }
+
+  const response = await fetch(input, { ...init, headers });
+  if (response.status === 401) {
+    clearAccessKey();
+  }
+  return response;
+}
+
+function clearAccessKey(): void {
+  closeStream();
+  sessionStorage.removeItem(ACCESS_KEY_STORAGE);
+  state.accessKey = null;
+  state.stage = "ready";
+  state.reviewId = null;
+  state.sessionId = null;
+  state.resultText = "";
+  state.progress = [];
+  state.questions = [];
+}
+
+async function bootstrap(): Promise<void> {
+  try {
+    const response = await fetch("/auth/config");
+    if (response.ok) {
+      const data = (await response.json()) as { auth_required?: boolean };
+      state.authRequired = Boolean(data.auth_required);
+    } else {
+      state.authRequired = true;
+    }
+  } catch {
+    state.authRequired = true;
+  } finally {
+    state.authChecked = true;
+    render();
+  }
 }
 
 function readableMode(mode: ReviewMode): string {
@@ -567,6 +739,16 @@ function intensityCopy(mode: ReviewMode): string {
   return "Balanced depth. Strong default for most serious paper reviews.";
 }
 
+function artifactHint(uploadedFilename: string | null, source: string): string {
+  if (uploadedFilename) {
+    return "Using the uploaded PDF.";
+  }
+  if (source) {
+    return "Using the provided link.";
+  }
+  return "PDF upload is the most reliable path.";
+}
+
 async function readErrorMessage(response: Response, fallback: string): Promise<string> {
   const text = await response.text();
   if (!text) {
@@ -583,4 +765,4 @@ async function readErrorMessage(response: Response, fallback: string): Promise<s
   return `${fallback}: ${text}`;
 }
 
-render();
+void bootstrap();

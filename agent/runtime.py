@@ -294,7 +294,10 @@ async def run_agent_streamed(
                     "input_preview": message.description,
                 })
             if isinstance(message, ResultMessage):
-                log.info("Agent finished — result length=%d chars", len(message.result))
+                log.info(
+                    "Agent finished — result length=%d chars, cost=$%.4f, duration=%dms",
+                    len(message.result), message.total_cost_usd or 0, message.duration_ms or 0,
+                )
                 result_emitted = True
                 append_event(
                     session.review_id,
@@ -342,6 +345,6 @@ async def run_agent_streamed(
         log.exception("Agent loop failed")
         append_event(session.review_id, "agent_failed", error=str(exc))
         update_run(session.review_id, status="failed", error=str(exc))
-        await session.events.put({"type": "error", "message": str(exc)})
+        await session.events.put({"type": "error", "message": "The review failed. Check server logs for details."})
     finally:
         await session.events.put({"type": "done"})

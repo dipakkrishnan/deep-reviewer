@@ -26,6 +26,11 @@ def _write_run(review_id: str, payload: dict[str, Any]) -> None:
     _run_path(review_id).write_text(json.dumps(payload, indent=2, sort_keys=True))
 
 
+def write_artifact(review_id: str, content: str) -> None:
+    RUNS_DIR.mkdir(parents=True, exist_ok=True)
+    (RUNS_DIR / f"{review_id}.md").write_text(content)
+
+
 def create_run(review_id: str, **fields: Any) -> None:
     payload = {
         "review_id": review_id,

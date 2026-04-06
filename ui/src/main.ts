@@ -60,10 +60,71 @@ function escapeHtml(value: string): string {
 }
 
 function markdownToHtml(text: string): string {
-  const blocks = text.trim().split(/\n{2,}/).filter(Boolean);
-  return blocks
-    .map((block) => renderBlock(block.trim()))
-    .join("");
+  const blocks = tokenizeBlocks(text);
+  return blocks.map((block) => renderBlock(block)).join("");
+}
+
+function tokenizeBlocks(text: string): string[] {
+  const normalized = text.replace(/\r\n/g, "\n").trim();
+  if (!normalized) {
+    return [];
+  }
+
+  const blocks: string[] = [];
+  const lines = normalized.split("\n");
+  let buffer: string[] = [];
+  let inDisplayMath = false;
+  let mathBuffer: string[] = [];
+
+  const flushBuffer = () => {
+    const joined = buffer.join("\n").trim();
+    if (joined) {
+      blocks.push(joined);
+    }
+    buffer = [];
+  };
+
+  const flushMath = () => {
+    const joined = mathBuffer.join("\n").trim();
+    if (joined) {
+      blocks.push(`$$\n${joined}\n$$`);
+    }
+    mathBuffer = [];
+  };
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    if (trimmed === "$$") {
+      if (inDisplayMath) {
+        flushMath();
+        inDisplayMath = false;
+      } else {
+        flushBuffer();
+        inDisplayMath = true;
+      }
+      continue;
+    }
+
+    if (inDisplayMath) {
+      mathBuffer.push(line);
+      continue;
+    }
+
+    if (!trimmed) {
+      flushBuffer();
+      continue;
+    }
+
+    buffer.push(line);
+  }
+
+  flushBuffer();
+  if (inDisplayMath) {
+    flushMath();
+  }
+
+  return blocks;
 }
 
 function renderBlock(block: string): string {
@@ -72,7 +133,13 @@ function renderBlock(block: string): string {
   }
 
   if (block.startsWith("$$") && block.endsWith("$$")) {
-    return renderMath(block.slice(2, -2).trim(), true);
+    return renderMath(
+      block
+        .replace(/^\$\$\s*/, "")
+        .replace(/\s*\$\$$/, "")
+        .trim(),
+      true
+    );
   }
 
   const lines = block.split("\n");
@@ -160,17 +227,17 @@ function render(): void {
 
         <section class="meta-panel glass">
           <div class="panel-head">
-            <p class="panel-kicker">Run</p>
-            <h3>Session</h3>
+            <p class="panel-kicker">Review</p>
+            <h3>Status</h3>
           </div>
           <dl class="meta-list">
-            <div><dt>Review ID</dt><dd>${escapeHtml(state.reviewId ?? "pending")}</dd></div>
-            <div><dt>Session</dt><dd>${escapeHtml(state.sessionId ?? "pending")}</dd></div>
+            <div><dt>Current phase</dt><dd>${escapeHtml(productPhase(state.stage))}</dd></div>
             <div><dt>Depth</dt><dd>${escapeHtml(readableMode(state.mode))}</dd></div>
+            <div><dt>Interview</dt><dd>${escapeHtml(interviewStatus(state.stage, state.questions.length))}</dd></div>
           </dl>
           <div class="panel-head panel-head-secondary">
-            <p class="panel-kicker">Activity</p>
-            <h3>Log</h3>
+            <p class="panel-kicker">What’s happening</p>
+            <h3>Timeline</h3>
           </div>
           <ul class="log-list">
             ${state.log.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
@@ -276,7 +343,7 @@ function renderTaskBody(): string {
           <h3>Review underway</h3>
         </div>
         <div class="progress-card">
-          <div class="pulse"></div>
+          <div class="pulse" aria-hidden="true"></div>
           <strong>${escapeHtml(state.statusText)}</strong>
         </div>
         ${feedItems ? `<ul class="progress-feed">${feedItems}</ul>` : ""}
@@ -289,7 +356,7 @@ function renderTaskBody(): string {
       <div class="section-intro">
         <p class="panel-kicker">Artifact</p>
         <h3>Final review</h3>
-        <p>The task is complete. This is the current review artifact returned by the backend.</p>
+        <p>The task is complete. This review artifact is ready to read, inspect, and use.</p>
       </div>
       <article class="report">
         ${state.resultText ? markdownToHtml(state.resultText) : "<p>No final artifact received yet.</p>"}
@@ -460,6 +527,23 @@ function readableMode(mode: ReviewMode): string {
   if (mode === "quick") return "Quick scan";
   if (mode === "deep") return "Deep review";
   return "Standard review";
+}
+
+function productPhase(stage: Stage): string {
+  if (stage === "interview") return "Interview";
+  if (stage === "running") return "Review in progress";
+  if (stage === "complete") return "Final artifact ready";
+  return "Ready to launch";
+}
+
+function interviewStatus(stage: Stage, questionCount: number): string {
+  if (stage === "interview") {
+    return questionCount > 0 ? `${questionCount} questions waiting` : "Waiting";
+  }
+  if (stage === "running" || stage === "complete") {
+    return questionCount > 0 ? "Completed" : "Not needed yet";
+  }
+  return "Not started";
 }
 
 function prettifyTitle(title: string): string {

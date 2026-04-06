@@ -14,7 +14,7 @@ from app_models import AnswerInput, ReviewInput, ReviewStarted
 from prompts.orchestrator import ORCHESTRATOR_PROMPT
 from telemetry import append_event, create_run, update_run
 from utils import load_artifact
-# from dotenv import load_dotenv
+from dotenv import load_dotenv
 
 logging.basicConfig(
     level=logging.INFO,
@@ -23,7 +23,7 @@ logging.basicConfig(
 log = logging.getLogger("deep-review")
 
 # Note(Dipak): re-enable to use Anthropic API directly
-# load_dotenv()
+load_dotenv()
 
 app = FastAPI()
 
@@ -61,7 +61,8 @@ async def start_review(body: ReviewInput):
     )
 
     system_prompt = ORCHESTRATOR_PROMPT.format(
-        self_play_rounds=settings.self_play_rounds
+        self_play_rounds=settings.self_play_rounds,
+        subagent_count=settings.subagent_count,
     )
 
     session = StreamSession(

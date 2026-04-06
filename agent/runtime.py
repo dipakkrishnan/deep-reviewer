@@ -1,9 +1,11 @@
 import asyncio
 import logging
 import sys
+import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from braintrust.wrappers.claude_agent_sdk import setup_claude_agent_sdk
 
 from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, SystemMessage, query
 from claude_agent_sdk.types import (
@@ -16,11 +18,14 @@ from claude_agent_sdk.types import (
     ToolPermissionContext,
     ToolUseBlock,
 )
+from agent.claude_tools import ORCHESTRATOR_TOOLS
+from telemetry import append_event, update_run, write_artifact
 
 log = logging.getLogger("deep-review")
-
-from agent.claude_tools import ORCHESTRATOR_TOOLS
-from telemetry import append_event, update_run
+setup_claude_agent_sdk(
+    project="deep-review",
+    api_key=os.environ.get("BRAINTRUST_API_KEY"),
+)
 
 AskUserHandler = Callable[[dict], dict[str, str]]
 
@@ -174,18 +179,33 @@ def _build_can_use_tool_streamed(session: StreamSession):
     return can_use_tool
 
 
+_TOOL_DISPLAY: dict[str, str] = {
+    "WebSearch": "Searching",
+    "WebFetch": "Reading page",
+    "Read": "Reading file",
+    "Write": "Writing file",
+    "Bash": "Running command",
+    "Agent": "Spawning expert",
+    "AskUserQuestion": "Interviewing you",
+    "ToolSearch": "Loading tools",
+}
+
+
 def _summarize_tool_input(name: str, input_data: dict) -> str:
     """Return a short human-readable preview of what a tool call is doing."""
+    label = _TOOL_DISPLAY.get(name, name)
     if name == "WebSearch":
-        return input_data.get("query", name)
+        return input_data.get("query", label)
     if name == "WebFetch":
-        return input_data.get("url", name)
+        return input_data.get("url", label)
     if name == "Read":
-        return input_data.get("file_path", name)
+        return input_data.get("file_path", label)
     if name == "Agent":
-        prompt = input_data.get("prompt", "")
-        return prompt[:80] + ("..." if len(prompt) > 80 else "")
-    return name
+        return input_data.get("description", "") or label
+    if name == "AskUserQuestion":
+        count = len(input_data.get("questions", []))
+        return f"{count} question{'s' if count != 1 else ''}"
+    return label
 
 
 async def run_agent_streamed(
@@ -258,19 +278,19 @@ async def run_agent_streamed(
                     if isinstance(block, ToolUseBlock):
                         await session.events.put({
                             "type": "progress",
-                            "tool": block.name,
+                            "tool": _TOOL_DISPLAY.get(block.name, block.name),
                             "input_preview": _summarize_tool_input(block.name, block.input),
                         })
             if isinstance(message, TaskStartedMessage):
                 await session.events.put({
                     "type": "progress",
-                    "tool": "Agent",
+                    "tool": "Spawning expert",
                     "input_preview": message.description,
                 })
             if isinstance(message, TaskProgressMessage):
                 await session.events.put({
                     "type": "progress",
-                    "tool": message.last_tool_name or "Agent",
+                    "tool": _TOOL_DISPLAY.get(message.last_tool_name or "", message.last_tool_name or "Expert"),
                     "input_preview": message.description,
                 })
             if isinstance(message, ResultMessage):
@@ -301,6 +321,8 @@ async def run_agent_streamed(
                     result_preview=(message.result or "")[:500],
                     error_messages=message.errors,
                 )
+                if message.result:
+                    write_artifact(session.review_id, message.result)
                 await session.events.put(
                     {"type": "status", "status": "final review ready"}
                 )

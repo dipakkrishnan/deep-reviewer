@@ -5,6 +5,7 @@ from agent.config_models import ReviewMode
 
 class ReviewInput(BaseModel):
     source: str
+    filename: str | None = None
     mode: ReviewMode = ReviewMode.STANDARD
     model: str = "claude-opus-4-6"
     max_subagents: int | None = Field(default=None, ge=1)

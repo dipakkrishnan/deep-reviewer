@@ -95,7 +95,7 @@ async def start_review(body: ReviewInput):
         status="loading_artifact",
     )
     try:
-        artifact = load_artifact(body.source)
+        artifact = load_artifact(body.source, filename=body.filename)
     except FileNotFoundError as exc:
         update_run(review_id, status="failed", error=str(exc))
         raise HTTPException(status_code=400, detail=str(exc)) from exc

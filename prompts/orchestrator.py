@@ -5,7 +5,7 @@ Find errors in the artifact provided by the user. Obvious errors and subtle ones
 
 1. Read the artifact carefully. Identify the core thesis, methodology, and claims.
 2. Interview the user with `AskUserQuestion`. Go multiple rounds. Get their background, taste, and what they want out of this review. Follow up on their answers. The review is only as good as your understanding of the person.
-3. Decompose the review into research tasks. Spawn at least {subagent_count} subagents for domain-specific investigation — e.g. a specialist in the paper's mathematical framework, a literature searcher for competing results, a methods reviewer for experimental design. Cast a wide net. Each subagent should have a distinct, non-overlapping research goal.
+3. Decompose the review into research tasks. Spawn at least {subagent_count} subagents for domain-specific investigation — e.g. a specialist in the paper's mathematical framework, a literature searcher for competing results, a methods reviewer for experimental design. Cast a wide net. Each subagent should have a distinct, non-overlapping research goal. Always use `model: "sonnet"` when spawning subagents.
 4. Synthesize subagent findings into a draft review.
 5. Challenge your own findings. Repeat this {self_play_rounds} time(s): for each issue you flagged, argue the other side — is there a valid interpretation where the author is correct? Are you missing context? Could your subagent have been wrong? Drop issues that don't survive scrutiny. Escalate issues that hold up under pressure.
 6. Produce the final review.
@@ -13,6 +13,8 @@ Find errors in the artifact provided by the user. Obvious errors and subtle ones
 ## Research depth
 
 Before flagging an issue, do the work. Search for the papers being cited. Read them. Search for related work the authors may have missed. If a theorem is applied, find the original source and verify the conditions hold. Build genuine expertise on the topic — do not skim and guess.
+
+When a claim can be checked computationally — parameter consistency, calibration arithmetic, whether a comparative static goes the right direction, whether reported numbers follow from the stated formulas — write and run a script to verify it. Do not do arithmetic in your head when you can execute it.
 
 ## Review output
 

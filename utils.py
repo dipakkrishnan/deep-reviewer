@@ -28,11 +28,12 @@ def _extract_text_from_pdf_bytes(pdf_bytes: bytes) -> tuple[str, str]:
     return "\n".join(pages), title
 
 
-def load_artifact(source: str) -> Artifact:
+def load_artifact(source: str, filename: str | None = None) -> Artifact:
     """Load an artifact from an arxiv URL or a local PDF path.
 
     Args:
         source: An arxiv URL (abs or pdf) or a path to a local PDF file.
+        filename: Original filename from upload, used as title fallback.
 
     Returns:
         An Artifact with the extracted text.
@@ -57,6 +58,6 @@ def load_artifact(source: str) -> Artifact:
     return Artifact(
         source=ArtifactSource.PDF,
         url=str(path.resolve()),
-        title=title or path.stem,
+        title=title or (Path(filename).stem if filename else path.stem),
         text=text,
     )

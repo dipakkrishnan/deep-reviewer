@@ -27,7 +27,8 @@ type AppState = {
   sessionId: string | null;
   title: string;
   statusText: string;
-  source: string;
+  sourceInput: string;
+  uploadedSource: string | null;
   mode: ReviewMode;
   questions: Question[];
   answers: Record<string, string>;
@@ -46,7 +47,8 @@ const state: AppState = {
   sessionId: null,
   title: "Deep Review",
   statusText: "Ready to launch a review.",
-  source: "",
+  sourceInput: "",
+  uploadedSource: null,
   mode: "standard",
   questions: [],
   answers: {},
@@ -349,10 +351,10 @@ function renderTaskBody(): string {
               }
             </div>
             <span class="field-divider">or paste a paper link</span>
-            <input id="source" value="${escapeHtml(state.source)}" placeholder="https://arxiv.org/abs/..." />
+            <input id="source" value="${escapeHtml(state.sourceInput)}" placeholder="https://arxiv.org/abs/..." />
             <div class="artifact-footer artifact-footer-simple">
               <button class="primary" id="start-review">Start Review</button>
-              <p class="artifact-hint">${escapeHtml(artifactHint(state.uploadedFilename, state.source))}</p>
+              <p class="artifact-hint">${escapeHtml(artifactHint(state.uploadedFilename, state.sourceInput))}</p>
             </div>
           </div>
         </section>
@@ -450,7 +452,7 @@ async function uploadFile(file: File): Promise<void> {
     return;
   }
   const data = (await resp.json()) as { path: string; filename: string };
-  state.source = data.path;
+  state.uploadedSource = data.path;
   state.uploadedFilename = data.filename;
   state.log.unshift(`Uploaded: ${data.filename}`);
   render();
@@ -461,8 +463,7 @@ function bindEvents(): void {
 
   const source = document.querySelector<HTMLInputElement>("#source");
   source?.addEventListener("change", () => {
-    state.source = source.value.trim();
-    state.uploadedFilename = null;
+    state.sourceInput = source.value.trim();
   });
 
   const dropZone = document.querySelector<HTMLDivElement>("#drop-zone");
@@ -499,7 +500,8 @@ async function startReview(): Promise<void> {
   state.progress = [];
   state.reviewId = null;
   state.sessionId = null;
-  state.log.unshift(`Submitting artifact: ${state.source}`);
+  const source = state.uploadedSource ?? state.sourceInput.trim();
+  state.log.unshift(`Submitting artifact: ${source}`);
   render();
 
   try {
@@ -507,7 +509,8 @@ async function startReview(): Promise<void> {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        source: state.source,
+        source,
+        filename: state.uploadedFilename,
         mode: state.mode,
         max_subagents: null
       })

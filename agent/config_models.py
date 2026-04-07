@@ -59,11 +59,12 @@ class AgentSettings(BaseModel):
     workspace: str = "/tmp/deep-review-workspace"
 
     @classmethod
-    def from_request(cls, request: ReviewRequest) -> "AgentSettings":
+    def from_request(cls, request: ReviewRequest, review_id: str) -> "AgentSettings":
         preset = get_review_preset(request.mode)
         return cls(
             mode=request.mode,
             model=request.model,
             subagent_count=request.max_subagents or preset.subagent_count,
             self_play_rounds=preset.self_play_rounds,
+            workspace=f"/tmp/deep-review-workspace/{review_id}",
         )

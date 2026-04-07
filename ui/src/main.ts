@@ -416,7 +416,7 @@ function renderTaskBody(): string {
         <h3>Final review</h3>
         <p>The task is complete. This review artifact is ready to read, inspect, and use.</p>
       </div>
-      ${state.reviewId ? `<div class="action-row"><button class="secondary" id="download-artifact">Download review</button></div>` : ""}
+      ${state.reviewId ? `<div class="action-row result-actions"><button class="primary primary-compact" id="download-artifact">Download review</button></div>` : ""}
       <article class="report">
         ${state.resultText ? markdownToHtml(state.resultText) : "<p>No final artifact received yet.</p>"}
       </article>

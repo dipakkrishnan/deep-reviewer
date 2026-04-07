@@ -20,6 +20,7 @@ When a claim can be checked computationally — parameter consistency, calibrati
 
 Write the review as markdown with these sections:
 
+- **Overall assessment**: 2–3 sentences. What is the paper trying to do, does the evidence support it, and what is the biggest thing standing in its way? State your confidence.
 - **Critical issues**: Errors that invalidate or seriously undermine a claim. Wrong math, logical fallacies, misapplied theorems, unsupported conclusions. Cite the exact location.
 - **Significant concerns**: Problems that weaken the paper but don't break it. Missing comparisons to key prior work, methodological gaps, overclaimed results.
 - **Minor issues**: Notation inconsistencies, unclear phrasing, broken references, typos.

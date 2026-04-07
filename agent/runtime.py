@@ -19,7 +19,7 @@ from claude_agent_sdk.types import (
     ToolUseBlock,
 )
 from agent.claude_tools import ORCHESTRATOR_TOOLS
-from telemetry import append_event, update_run, write_artifact
+from telemetry import append_event, capture, update_run, write_artifact
 
 log = logging.getLogger("deep-review")
 setup_claude_agent_sdk(
@@ -326,6 +326,13 @@ async def run_agent_streamed(
                 )
                 if message.result:
                     write_artifact(session.review_id, message.result)
+                capture(
+                    "review_completed" if not message.is_error else "review_failed",
+                    session.review_id,
+                    cost_usd=message.total_cost_usd,
+                    duration_ms=message.duration_ms,
+                    num_turns=message.num_turns,
+                )
                 await session.events.put(
                     {"type": "status", "status": "final review ready"}
                 )

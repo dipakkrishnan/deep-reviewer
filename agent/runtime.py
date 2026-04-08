@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from braintrust.wrappers.claude_agent_sdk import setup_claude_agent_sdk
 
-from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, SystemMessage, query
+from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient, ResultMessage, SystemMessage
 from claude_agent_sdk.types import (
     AssistantMessage,
     HookMatcher,
@@ -106,13 +106,20 @@ async def run_agent(
         log.info("Agent loop starting")
         result_text = ""
         captured_session_id = session_id
-        async for message in query(prompt=prompt_stream(), options=options):
-            if isinstance(message, SystemMessage) and message.subtype == "init":
-                captured_session_id = message.data.get("session_id")
-                log.info("Session established: %s", captured_session_id)
-            if isinstance(message, ResultMessage):
-                result_text = message.result
-                log.info("Agent finished — result length=%d chars", len(result_text))
+        client = ClaudeSDKClient(options=options)
+        try:
+            await client.connect()
+            await client.query(prompt_stream())
+            async for message in client.receive_response():
+                if isinstance(message, SystemMessage) and message.subtype == "init":
+                    captured_session_id = message.data.get("session_id")
+                    log.info("Session established: %s", captured_session_id)
+                if isinstance(message, ResultMessage):
+                    result_text = message.result
+                    log.info("Agent finished — result length=%d chars", len(result_text))
+                    break
+        finally:
+            await client.disconnect()
         return AgentResult(text=result_text, session_id=captured_session_id)
 
     raise NotImplementedError(f"Unsupported provider: {provider}")
@@ -263,8 +270,11 @@ async def run_agent_streamed(
                 "message": {"role": "user", "content": user_prompt},
             }
 
+        client = ClaudeSDKClient(options=options)
+        await client.connect()
+        await client.query(prompt_stream())
         await session.events.put({"type": "status", "status": "running"})
-        async for message in query(prompt=prompt_stream(), options=options):
+        async for message in client.receive_response():
             if isinstance(message, SystemMessage) and message.subtype == "init":
                 sid = message.data.get("session_id")
                 log.info("Session established: %s", sid)
@@ -354,4 +364,5 @@ async def run_agent_streamed(
         update_run(session.review_id, status="failed", error=str(exc))
         await session.events.put({"type": "error", "message": "The review failed. Check server logs for details."})
     finally:
+        await client.disconnect()
         await session.events.put({"type": "done"})

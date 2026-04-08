@@ -108,8 +108,9 @@ async def run_agent(
         captured_session_id = session_id
         client = ClaudeSDKClient(options=options)
         try:
-            await client.connect(prompt=prompt_stream())
-            async for message in client.receive_messages():
+            await client.connect()
+            await client.query(prompt_stream())
+            async for message in client.receive_response():
                 if isinstance(message, SystemMessage) and message.subtype == "init":
                     captured_session_id = message.data.get("session_id")
                     log.info("Session established: %s", captured_session_id)
@@ -270,9 +271,10 @@ async def run_agent_streamed(
             }
 
         client = ClaudeSDKClient(options=options)
-        await client.connect(prompt=prompt_stream())
+        await client.connect()
+        await client.query(prompt_stream())
         await session.events.put({"type": "status", "status": "running"})
-        async for message in client.receive_messages():
+        async for message in client.receive_response():
             if isinstance(message, SystemMessage) and message.subtype == "init":
                 sid = message.data.get("session_id")
                 log.info("Session established: %s", sid)

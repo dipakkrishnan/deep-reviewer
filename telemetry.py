@@ -1,13 +1,30 @@
 import json
+import logging
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+import posthog
+
+_POSTHOG_KEY = os.getenv("POSTHOG_API_KEY")
+if _POSTHOG_KEY:
+    posthog.project_api_key = _POSTHOG_KEY
+    posthog.host = "https://us.i.posthog.com"
+
+log = logging.getLogger("deep-review")
 
 RUNS_DIR = Path("review_runs")
 
 
 def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def capture(event: str, review_id: str, **properties: Any) -> None:
+    if not _POSTHOG_KEY:
+        return
+    posthog.capture(distinct_id=review_id, event=event, properties=properties)
 
 
 def _run_path(review_id: str) -> Path:

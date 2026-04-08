@@ -12,7 +12,7 @@ from starlette.responses import FileResponse, JSONResponse, StreamingResponse
 from agent.config_models import AgentSettings, ReviewRequest
 from app_models import AnswerInput, ReviewInput, ReviewStarted
 from prompts.orchestrator import ORCHESTRATOR_PROMPT
-from telemetry import RUNS_DIR, append_event, create_run, update_run
+from telemetry import RUNS_DIR, append_event, capture, create_run, update_run
 from utils import load_artifact
 from dotenv import load_dotenv
 
@@ -142,6 +142,7 @@ async def start_review(body: ReviewInput):
         subagent_count=settings.subagent_count,
         self_play_rounds=settings.self_play_rounds,
     )
+    capture("review_started", review_id, mode=body.mode, model=settings.model)
 
     asyncio.create_task(
         run_agent_streamed(
@@ -196,6 +197,7 @@ async def answer_questions(review_id: str, body: AnswerInput):
     )
     await session.events.put({"type": "status", "status": "answers received"})
     session.answer_event.set()
+    capture("answers_submitted", review_id)
     return {"status": "ok"}
 
 
@@ -204,6 +206,7 @@ async def download_artifact(review_id: str):
     path = RUNS_DIR / f"{review_id}.md"
     if not path.exists():
         raise HTTPException(status_code=404, detail="Artifact not found")
+    capture("artifact_downloaded", review_id)
     return FileResponse(path, media_type="text/markdown", filename=f"{review_id}.md")
 
 

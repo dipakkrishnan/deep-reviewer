@@ -9,6 +9,7 @@ dependencies = [
     "claude-agent-sdk>=0.1.56",
     "fastapi>=0.135.3",
     "httpx>=0.28.1",
+    "posthog>=7.9.12",
     "pydantic>=2.12.5",
     "pymupdf>=1.27.2.2",
     "python-dotenv>=1.2.2",

@@ -9,7 +9,7 @@ import posthog
 
 _POSTHOG_KEY = os.getenv("POSTHOG_API_KEY")
 if _POSTHOG_KEY:
-    posthog.project_api_key = _POSTHOG_KEY
+    posthog.api_key = _POSTHOG_KEY
     posthog.host = "https://us.i.posthog.com"
 
 log = logging.getLogger("deep-review")

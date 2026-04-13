@@ -20,6 +20,9 @@ dependencies = [
     "sympy>=1.13.0",
     "pandas>=2.2.0",
     "matplotlib>=3.9.0",
+    "networkx>=3.3",
+    "statsmodels>=0.14.0",
+    "scikit-learn>=1.5.0",
 ]
 
 [dependency-groups]

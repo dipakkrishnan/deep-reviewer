@@ -16,7 +16,8 @@ type StreamEvent =
   | { type: "progress"; tool?: string; input_preview?: string }
   | { type: "result"; text?: string }
   | { type: "error"; message?: string }
-  | { type: "done" };
+  | { type: "done" }
+  | { type: "keepalive" };
 
 type AppState = {
   accessKey: string | null;
@@ -35,6 +36,9 @@ type AppState = {
   resultText: string;
   progress: Array<{ tool: string; detail: string }>;
   uploadedFilename: string | null;
+  lastEventAt: number;
+  elapsedTimer: ReturnType<typeof setInterval> | null;
+  notifyOnDone: boolean;
 };
 
 const state: AppState = {
@@ -54,6 +58,9 @@ const state: AppState = {
   resultText: "",
   progress: [],
   uploadedFilename: null,
+  lastEventAt: 0,
+  elapsedTimer: null,
+  notifyOnDone: false,
 };
 
 let stream: EventSource | null = null;
@@ -402,9 +409,18 @@ function renderTaskBody(): string {
         </div>
         <div class="progress-card">
           <div class="pulse" aria-hidden="true"></div>
-          <strong>${escapeHtml(state.statusText)}</strong>
+          <div class="progress-card-text">
+            <strong>${escapeHtml(state.statusText)}</strong>
+            ${state.lastEventAt ? `<span class="elapsed">${Math.floor((Date.now() - state.lastEventAt) / 1000)}s since last activity</span>` : ""}
+          </div>
         </div>
         ${feedItems ? `<ul class="progress-feed">${feedItems}</ul>` : ""}
+        ${"Notification" in window && Notification.permission !== "denied" ? `
+        <div class="notify-row">
+          <button class="notify-toggle ${state.notifyOnDone ? "notify-on" : ""}" id="toggle-notify">
+            ${state.notifyOnDone ? "🔔 Notify me when done" : "🔕 Notify me when done"}
+          </button>
+        </div>` : ""}
       </div>
     `;
   }
@@ -472,6 +488,7 @@ function bindEvents(): void {
 
   document.querySelector<HTMLButtonElement>("#start-review")?.addEventListener("click", startReview);
   document.querySelector<HTMLButtonElement>("#download-artifact")?.addEventListener("click", downloadArtifact);
+  document.querySelector<HTMLButtonElement>("#toggle-notify")?.addEventListener("click", toggleNotify);
   document.querySelector<HTMLFormElement>("#answer-form")?.addEventListener("submit", submitAnswers);
 }
 
@@ -528,30 +545,75 @@ function openStream(reviewId: string): void {
   };
 
   stream.onerror = () => {
-    if (stream?.readyState === EventSource.CLOSED && !state.resultText && state.stage !== "ready") {
-      clearAccessKey();
-      render();
+    closeStream();
+    stopElapsedTimer();
+
+    // Mid-review disconnect: try to recover the artifact silently before showing anything.
+    if (state.reviewId && !state.resultText && state.stage === "running") {
+      authFetch(`/review/${state.reviewId}/artifact`)
+        .then(async (resp) => {
+          if (resp.ok) {
+            const text = await resp.text();
+            state.resultText = text;
+            state.stage = "complete";
+            state.statusText = "Review complete.";
+            if (state.notifyOnDone && document.hidden && Notification.permission === "granted") {
+              new Notification("Review ready", {
+                body: `Your review of "${state.title}" is complete.`,
+                icon: "/favicon.svg",
+              });
+            }
+          } else {
+            state.statusText = "Still working — refresh to reconnect.";
+          }
+          render();
+        })
+        .catch(() => {
+          state.statusText = "Still working — refresh to reconnect.";
+          render();
+        });
       return;
     }
 
-    closeStream();
     render();
   };
 }
 
+function stopElapsedTimer(): void {
+  if (state.elapsedTimer !== null) {
+    clearInterval(state.elapsedTimer);
+    state.elapsedTimer = null;
+  }
+}
+
+function startElapsedTimer(): void {
+  stopElapsedTimer();
+  state.lastEventAt = Date.now();
+  state.elapsedTimer = setInterval(() => render(), 1000);
+}
+
 function handleEvent(event: StreamEvent): void {
+  if (event.type === "keepalive") {
+    state.lastEventAt = Date.now();
+    return;
+  }
+
   if (event.type === "status") {
     state.statusText = event.status ?? "running";
     if (event.session_id) {
       state.sessionId = event.session_id;
     }
-
+    if (state.stage !== "running") {
+      state.stage = "running";
+      startElapsedTimer();
+    }
   }
 
   if (event.type === "progress") {
     const entry = { tool: event.tool ?? "Agent", detail: event.input_preview ?? "" };
     state.progress.unshift(entry);
     if (state.progress.length > 30) state.progress.length = 30;
+    state.lastEventAt = Date.now();
   }
 
   if (event.type === "questions") {
@@ -559,20 +621,30 @@ function handleEvent(event: StreamEvent): void {
     state.answers = {};
     state.stage = "interview";
     state.statusText = "Interview waiting on answers.";
-
+    stopElapsedTimer();
   }
 
   if (event.type === "result") {
     state.resultText = event.text ?? "";
     state.stage = "complete";
     state.statusText = "Review complete.";
-
+    stopElapsedTimer();
+    if (document.hidden && Notification.permission === "granted") {
+      new Notification("Review ready", {
+        body: `Your review of "${state.title}" is complete.`,
+        icon: "/favicon.svg",
+      });
+    }
   }
 
   if (event.type === "error") {
     state.stage = "ready";
     state.statusText = "Run failed.";
+    stopElapsedTimer();
+  }
 
+  if (event.type === "done") {
+    stopElapsedTimer();
   }
 
   render();
@@ -618,6 +690,21 @@ async function submitAnswers(event: SubmitEvent): Promise<void> {
 
     render();
   }
+}
+
+async function toggleNotify(): Promise<void> {
+  if (state.notifyOnDone) {
+    state.notifyOnDone = false;
+    render();
+    return;
+  }
+  if (Notification.permission === "granted") {
+    state.notifyOnDone = true;
+  } else if (Notification.permission === "default") {
+    const result = await Notification.requestPermission();
+    state.notifyOnDone = result === "granted";
+  }
+  render();
 }
 
 async function downloadArtifact(): Promise<void> {

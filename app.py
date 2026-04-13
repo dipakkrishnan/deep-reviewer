@@ -166,14 +166,24 @@ async def stream_review(review_id: str):
     session = sessions[review_id]
 
     async def event_generator():
+        async def heartbeat():
+            while True:
+                await asyncio.sleep(20)
+                await session.events.put({"type": "keepalive"})
+
+        hb = asyncio.create_task(heartbeat())
         try:
             while True:
                 event = await session.events.get()
+                if event.get("type") == "keepalive":
+                    yield f"data: {json.dumps(event)}\n\n"
+                    continue
                 append_event(review_id, "stream_event", payload=event)
                 yield f"data: {json.dumps(event)}\n\n"
                 if event.get("type") in ("done", "error"):
                     break
         finally:
+            hb.cancel()
             update_run(review_id, stream_closed=True)
             sessions.pop(review_id, None)
 

@@ -444,10 +444,40 @@ select {
   animation: signalPulse 1.8s ease-in-out infinite;
 }
 
+.progress-card-text {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .elapsed {
   font-size: 11px;
   color: var(--muted);
-  margin-left: auto;
+}
+
+.notify-row {
+  margin-top: 12px;
+}
+
+.notify-toggle {
+  background: none;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 6px 12px;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.notify-toggle:hover {
+  border-color: rgba(255, 255, 255, 0.25);
+  color: var(--text);
+}
+
+.notify-toggle.notify-on {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .report {

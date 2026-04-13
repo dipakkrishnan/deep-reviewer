@@ -38,6 +38,7 @@ type AppState = {
   uploadedFilename: string | null;
   lastEventAt: number;
   elapsedTimer: ReturnType<typeof setInterval> | null;
+  notifyOnDone: boolean;
 };
 
 const state: AppState = {
@@ -59,6 +60,7 @@ const state: AppState = {
   uploadedFilename: null,
   lastEventAt: 0,
   elapsedTimer: null,
+  notifyOnDone: false,
 };
 
 let stream: EventSource | null = null;
@@ -407,10 +409,18 @@ function renderTaskBody(): string {
         </div>
         <div class="progress-card">
           <div class="pulse" aria-hidden="true"></div>
-          <strong>${escapeHtml(state.statusText)}</strong>
-          ${state.lastEventAt ? `<span class="elapsed">${Math.floor((Date.now() - state.lastEventAt) / 1000)}s since last activity</span>` : ""}
+          <div class="progress-card-text">
+            <strong>${escapeHtml(state.statusText)}</strong>
+            ${state.lastEventAt ? `<span class="elapsed">${Math.floor((Date.now() - state.lastEventAt) / 1000)}s since last activity</span>` : ""}
+          </div>
         </div>
         ${feedItems ? `<ul class="progress-feed">${feedItems}</ul>` : ""}
+        ${"Notification" in window && Notification.permission !== "denied" ? `
+        <div class="notify-row">
+          <button class="notify-toggle ${state.notifyOnDone ? "notify-on" : ""}" id="toggle-notify">
+            ${state.notifyOnDone ? "🔔 Notify me when done" : "🔕 Notify me when done"}
+          </button>
+        </div>` : ""}
       </div>
     `;
   }
@@ -478,6 +488,7 @@ function bindEvents(): void {
 
   document.querySelector<HTMLButtonElement>("#start-review")?.addEventListener("click", startReview);
   document.querySelector<HTMLButtonElement>("#download-artifact")?.addEventListener("click", downloadArtifact);
+  document.querySelector<HTMLButtonElement>("#toggle-notify")?.addEventListener("click", toggleNotify);
   document.querySelector<HTMLFormElement>("#answer-form")?.addEventListener("submit", submitAnswers);
 }
 
@@ -526,9 +537,6 @@ async function startReview(): Promise<void> {
 
 function openStream(reviewId: string): void {
   closeStream();
-  if ("Notification" in window && Notification.permission === "default") {
-    Notification.requestPermission();
-  }
   const token = encodeURIComponent(state.accessKey ?? "");
   stream = new EventSource(`/review/${reviewId}/stream?token=${token}`);
 
@@ -549,7 +557,7 @@ function openStream(reviewId: string): void {
             state.resultText = text;
             state.stage = "complete";
             state.statusText = "Review complete.";
-            if (document.hidden && Notification.permission === "granted") {
+            if (state.notifyOnDone && document.hidden && Notification.permission === "granted") {
               new Notification("Review ready", {
                 body: `Your review of "${state.title}" is complete.`,
                 icon: "/favicon.svg",
@@ -682,6 +690,21 @@ async function submitAnswers(event: SubmitEvent): Promise<void> {
 
     render();
   }
+}
+
+async function toggleNotify(): Promise<void> {
+  if (state.notifyOnDone) {
+    state.notifyOnDone = false;
+    render();
+    return;
+  }
+  if (Notification.permission === "granted") {
+    state.notifyOnDone = true;
+  } else if (Notification.permission === "default") {
+    const result = await Notification.requestPermission();
+    state.notifyOnDone = result === "granted";
+  }
+  render();
 }
 
 async function downloadArtifact(): Promise<void> {

@@ -537,13 +537,36 @@ function openStream(reviewId: string): void {
   };
 
   stream.onerror = () => {
-    if (stream?.readyState === EventSource.CLOSED && !state.resultText && state.stage !== "ready") {
-      clearAccessKey();
-      render();
+    closeStream();
+    stopElapsedTimer();
+
+    // Mid-review disconnect: try to recover the artifact silently before showing anything.
+    if (state.reviewId && !state.resultText && state.stage === "running") {
+      authFetch(`/review/${state.reviewId}/artifact`)
+        .then(async (resp) => {
+          if (resp.ok) {
+            const text = await resp.text();
+            state.resultText = text;
+            state.stage = "complete";
+            state.statusText = "Review complete.";
+            if (document.hidden && Notification.permission === "granted") {
+              new Notification("Review ready", {
+                body: `Your review of "${state.title}" is complete.`,
+                icon: "/favicon.svg",
+              });
+            }
+          } else {
+            state.statusText = "Still working — refresh to reconnect.";
+          }
+          render();
+        })
+        .catch(() => {
+          state.statusText = "Still working — refresh to reconnect.";
+          render();
+        });
       return;
     }
 
-    closeStream();
     render();
   };
 }

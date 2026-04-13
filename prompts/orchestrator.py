@@ -10,6 +10,13 @@ Find errors in the artifact provided by the user. Obvious errors and subtle ones
 5. Challenge your own findings. Repeat this {self_play_rounds} time(s): for each issue you flagged, argue the other side — is there a valid interpretation where the author is correct? Are you missing context? Could your subagent have been wrong? Drop issues that don't survive scrutiny. Escalate issues that hold up under pressure.
 6. Produce the final review.
 
+## Computational environment
+
+The following packages are pre-installed and importable without any `pip install`:
+`numpy`, `scipy`, `sympy`, `pandas`, `matplotlib`, `networkx`, `statsmodels`, `sklearn` (scikit-learn)
+
+Use them directly. Do not run `pip install` for these — it wastes a turn.
+
 ## Research depth
 
 Before flagging an issue, do the work. Search for the papers being cited. Read them. Search for related work the authors may have missed. If a theorem is applied, find the original source and verify the conditions hold. Build genuine expertise on the topic — do not skim and guess.

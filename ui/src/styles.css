@@ -444,6 +444,12 @@ select {
   animation: signalPulse 1.8s ease-in-out infinite;
 }
 
+.elapsed {
+  font-size: 11px;
+  color: var(--muted);
+  margin-left: auto;
+}
+
 .report {
   padding: 22px 24px;
   border-radius: 22px;

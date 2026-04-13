@@ -16,7 +16,8 @@ type StreamEvent =
   | { type: "progress"; tool?: string; input_preview?: string }
   | { type: "result"; text?: string }
   | { type: "error"; message?: string }
-  | { type: "done" };
+  | { type: "done" }
+  | { type: "keepalive" };
 
 type AppState = {
   accessKey: string | null;
@@ -35,6 +36,8 @@ type AppState = {
   resultText: string;
   progress: Array<{ tool: string; detail: string }>;
   uploadedFilename: string | null;
+  lastEventAt: number;
+  elapsedTimer: ReturnType<typeof setInterval> | null;
 };
 
 const state: AppState = {
@@ -54,6 +57,8 @@ const state: AppState = {
   resultText: "",
   progress: [],
   uploadedFilename: null,
+  lastEventAt: 0,
+  elapsedTimer: null,
 };
 
 let stream: EventSource | null = null;
@@ -403,6 +408,7 @@ function renderTaskBody(): string {
         <div class="progress-card">
           <div class="pulse" aria-hidden="true"></div>
           <strong>${escapeHtml(state.statusText)}</strong>
+          ${state.lastEventAt ? `<span class="elapsed">${Math.floor((Date.now() - state.lastEventAt) / 1000)}s since last activity</span>` : ""}
         </div>
         ${feedItems ? `<ul class="progress-feed">${feedItems}</ul>` : ""}
       </div>
@@ -520,6 +526,9 @@ async function startReview(): Promise<void> {
 
 function openStream(reviewId: string): void {
   closeStream();
+  if ("Notification" in window && Notification.permission === "default") {
+    Notification.requestPermission();
+  }
   const token = encodeURIComponent(state.accessKey ?? "");
   stream = new EventSource(`/review/${reviewId}/stream?token=${token}`);
 
@@ -539,19 +548,41 @@ function openStream(reviewId: string): void {
   };
 }
 
+function stopElapsedTimer(): void {
+  if (state.elapsedTimer !== null) {
+    clearInterval(state.elapsedTimer);
+    state.elapsedTimer = null;
+  }
+}
+
+function startElapsedTimer(): void {
+  stopElapsedTimer();
+  state.lastEventAt = Date.now();
+  state.elapsedTimer = setInterval(() => render(), 1000);
+}
+
 function handleEvent(event: StreamEvent): void {
+  if (event.type === "keepalive") {
+    state.lastEventAt = Date.now();
+    return;
+  }
+
   if (event.type === "status") {
     state.statusText = event.status ?? "running";
     if (event.session_id) {
       state.sessionId = event.session_id;
     }
-
+    if (state.stage !== "running") {
+      state.stage = "running";
+      startElapsedTimer();
+    }
   }
 
   if (event.type === "progress") {
     const entry = { tool: event.tool ?? "Agent", detail: event.input_preview ?? "" };
     state.progress.unshift(entry);
     if (state.progress.length > 30) state.progress.length = 30;
+    state.lastEventAt = Date.now();
   }
 
   if (event.type === "questions") {
@@ -559,20 +590,30 @@ function handleEvent(event: StreamEvent): void {
     state.answers = {};
     state.stage = "interview";
     state.statusText = "Interview waiting on answers.";
-
+    stopElapsedTimer();
   }
 
   if (event.type === "result") {
     state.resultText = event.text ?? "";
     state.stage = "complete";
     state.statusText = "Review complete.";
-
+    stopElapsedTimer();
+    if (document.hidden && Notification.permission === "granted") {
+      new Notification("Review ready", {
+        body: `Your review of "${state.title}" is complete.`,
+        icon: "/favicon.svg",
+      });
+    }
   }
 
   if (event.type === "error") {
     state.stage = "ready";
     state.statusText = "Run failed.";
+    stopElapsedTimer();
+  }
 
+  if (event.type === "done") {
+    stopElapsedTimer();
   }
 
   render();

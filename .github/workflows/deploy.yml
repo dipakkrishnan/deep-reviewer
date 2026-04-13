@@ -35,4 +35,5 @@ jobs:
           gcloud run deploy deep-review \
             --image=$IMAGE:$GITHUB_SHA \
             --region=$REGION \
+            --timeout=3600 \
             --quiet

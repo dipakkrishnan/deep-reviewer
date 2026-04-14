@@ -1,4 +1,5 @@
 from enum import StrEnum
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -68,3 +69,49 @@ class AgentSettings(BaseModel):
             self_play_rounds=preset.self_play_rounds,
             workspace=f"/tmp/deep-review-workspace/{review_id}",
         )
+
+
+class ReviewPackageEntry(BaseModel):
+    """Provisional schema for user-facing work product exports."""
+
+    key: str
+    label: str
+    source: Literal["report", "session", "workspace"]
+    path: str
+    description: str | None = None
+    include_by_default: bool = True
+    workspace_globs: list[str] = Field(default_factory=list)
+
+
+class ReviewPackageConfig(BaseModel):
+    """
+    Sketch of the review package contract.
+
+    This is intentionally still being iterated on. The goal is to keep a stable
+    user-facing export shape even as the internal session workspace evolves.
+    """
+
+    version: str = "v1alpha"
+    archive_label: str = "work-product"
+    entries: list[ReviewPackageEntry]
+
+
+DEFAULT_REVIEW_PACKAGE = ReviewPackageConfig(
+    entries=[
+        ReviewPackageEntry(
+            key="report",
+            label="Final review",
+            source="report",
+            path="report.md",
+            description="The final markdown review shown in the app.",
+        ),
+        ReviewPackageEntry(
+            key="verification",
+            label="Verification files",
+            source="workspace",
+            path="verification",
+            description="Selected scripts and generated files from the review workspace.",
+            workspace_globs=["*.py", "*.ipynb", "*.txt", "*.csv", "*.json", "*.md"],
+        ),
+    ]
+)

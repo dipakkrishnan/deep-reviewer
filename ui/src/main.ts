@@ -428,11 +428,11 @@ function renderTaskBody(): string {
   return `
     <div class="body-block result-block">
       <div class="section-intro">
-        <p class="panel-kicker">Artifact</p>
+        <p class="panel-kicker">Work Product</p>
         <h3>Final review</h3>
-        <p>The task is complete. This review artifact is ready to read, inspect, and use.</p>
+        <p>The task is complete. Download the work product to get the review and any curated verification files.</p>
       </div>
-      ${state.reviewId ? `<div class="action-row result-actions"><button class="primary primary-compact" id="download-artifact">Download review</button></div>` : ""}
+      ${state.reviewId ? `<div class="action-row result-actions"><button class="primary primary-compact" id="download-package">Download work product</button></div>` : ""}
       <article class="report">
         ${state.resultText ? markdownToHtml(state.resultText) : "<p>No final artifact received yet.</p>"}
       </article>
@@ -487,7 +487,7 @@ function bindEvents(): void {
   });
 
   document.querySelector<HTMLButtonElement>("#start-review")?.addEventListener("click", startReview);
-  document.querySelector<HTMLButtonElement>("#download-artifact")?.addEventListener("click", downloadArtifact);
+  document.querySelector<HTMLButtonElement>("#download-package")?.addEventListener("click", downloadPackage);
   document.querySelector<HTMLButtonElement>("#toggle-notify")?.addEventListener("click", toggleNotify);
   document.querySelector<HTMLFormElement>("#answer-form")?.addEventListener("submit", submitAnswers);
 }
@@ -707,15 +707,15 @@ async function toggleNotify(): Promise<void> {
   render();
 }
 
-async function downloadArtifact(): Promise<void> {
+async function downloadPackage(): Promise<void> {
   if (!state.reviewId) return;
-  const resp = await authFetch(`/review/${state.reviewId}/artifact`);
+  const resp = await authFetch(`/review/${state.reviewId}/package`);
   if (!resp.ok) return;
   const blob = await resp.blob();
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `${state.reviewId}.md`;
+  a.download = `${state.reviewId}-work-product.zip`;
   a.click();
   URL.revokeObjectURL(url);
 }

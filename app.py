@@ -1,15 +1,17 @@
 import asyncio
+import io
 import json
 import logging
 import os
 import uuid
+import zipfile
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request, UploadFile
 from fastapi.staticfiles import StaticFiles
 from starlette.responses import FileResponse, JSONResponse, StreamingResponse
 
-from agent.config_models import AgentSettings, ReviewRequest
+from agent.config_models import AgentSettings, DEFAULT_REVIEW_PACKAGE, ReviewRequest
 from app_models import AnswerInput, ReviewInput, ReviewStarted
 from prompts.orchestrator import ORCHESTRATOR_PROMPT
 from telemetry import RUNS_DIR, append_event, capture, create_run, update_run
@@ -48,6 +50,89 @@ def _is_authorized(request: Request) -> bool:
         return True
 
     return False
+
+
+def _run_json_path(review_id: str) -> Path:
+    return RUNS_DIR / f"{review_id}.json"
+
+
+def _artifact_path(review_id: str) -> Path:
+    return RUNS_DIR / f"{review_id}.md"
+
+
+def _load_run_payload(review_id: str) -> dict:
+    path = _run_json_path(review_id)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Review not found")
+    return json.loads(path.read_text())
+
+
+def _collect_workspace_files(workspace: Path) -> list[Path]:
+    if not workspace.exists():
+        return []
+
+    matches: dict[str, Path] = {}
+    for entry in DEFAULT_REVIEW_PACKAGE.entries:
+        if entry.source != "workspace" or not entry.include_by_default:
+            continue
+        for pattern in entry.workspace_globs:
+            for path in workspace.rglob(pattern):
+                if path.is_file():
+                    rel = path.relative_to(workspace).as_posix()
+                    matches[rel] = path
+    return [matches[key] for key in sorted(matches)]
+
+
+def _build_package_readme(review_id: str, run_payload: dict, workspace_files: list[Path]) -> str:
+    artifact_title = run_payload.get("artifact_title") or review_id
+    lines = [
+        "# Deep Review Work Product",
+        "",
+        f"- Review ID: `{review_id}`",
+        f"- Title: {artifact_title}",
+        f"- Package schema: `{DEFAULT_REVIEW_PACKAGE.version}`",
+        "",
+        "## Contents",
+        "",
+        "- `report.md`: final review artifact",
+    ]
+
+    if workspace_files:
+        lines.append("- `verification/`: selected files captured from the review workspace")
+    else:
+        lines.append("- `verification/`: no curated workspace files were captured for this run")
+
+    lines.extend(
+        [
+            "",
+            "This package is a curated export of the review session, not a raw dump of the full workspace.",
+        ]
+    )
+    return "\n".join(lines) + "\n"
+
+
+def _build_review_package(review_id: str) -> tuple[bytes, str]:
+    run_payload = _load_run_payload(review_id)
+    artifact_path = _artifact_path(review_id)
+    if not artifact_path.exists():
+        raise HTTPException(status_code=404, detail="Artifact not found")
+
+    workspace_root = Path(run_payload.get("workspace") or "")
+    workspace_files = _collect_workspace_files(workspace_root) if run_payload.get("workspace") else []
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("report.md", artifact_path.read_text())
+        archive.writestr("README.md", _build_package_readme(review_id, run_payload, workspace_files))
+
+        for path in workspace_files:
+            if workspace_root not in path.parents and path != workspace_root:
+                continue
+            rel = path.relative_to(workspace_root).as_posix()
+            archive.write(path, arcname=f"verification/{rel}")
+
+    package_name = f"{review_id}-{DEFAULT_REVIEW_PACKAGE.archive_label}.zip"
+    return buffer.getvalue(), package_name
 
 
 @app.middleware("http")
@@ -213,11 +298,22 @@ async def answer_questions(review_id: str, body: AnswerInput):
 
 @app.get("/review/{review_id}/artifact")
 async def download_artifact(review_id: str):
-    path = RUNS_DIR / f"{review_id}.md"
+    path = _artifact_path(review_id)
     if not path.exists():
         raise HTTPException(status_code=404, detail="Artifact not found")
     capture("artifact_downloaded", review_id)
     return FileResponse(path, media_type="text/markdown", filename=f"{review_id}.md")
+
+
+@app.get("/review/{review_id}/package")
+async def download_package(review_id: str):
+    package_bytes, filename = _build_review_package(review_id)
+    capture("work_product_downloaded", review_id)
+    return StreamingResponse(
+        io.BytesIO(package_bytes),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 if UI_DIST.exists():
